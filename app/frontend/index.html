@@ -3,318 +3,84 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Muffin</title>
-  <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+  <title>GitHub File Reader</title>
   <style>
     :root { color-scheme: light dark; }
-    * { box-sizing: border-box; }
-    body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue'; background: #0b1022; color: #e5e7eb; }
-    header { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid #1f2937; background: #0f172a; }
-    header input { width: 360px; padding: 8px 10px; border-radius: 8px; border: 1px solid #374151; background: #0a0f20; color: #e5e7eb; }
-    header .row { display: flex; align-items: center; gap: 8px; }
-    main { display: grid; grid-template-columns: 260px 1fr 280px; min-height: calc(100vh - 50px); }
-    aside { border-right: 1px solid #1f2937; padding: 12px; }
-    .panel { border-left: 1px solid #1f2937; padding: 12px; }
-    .watchlist { display: flex; flex-direction: column; gap: 6px; }
-    .watch-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border: 1px solid #374151; border-radius: 8px; cursor: pointer; }
-    .watch-item .badge { font-size: 12px; padding: 2px 6px; border-radius: 999px; background: #0a0f20; border: 1px solid #374151; }
-    .controls { display: flex; gap: 6px; padding: 10px; border-bottom: 1px solid #1f2937; }
-    .controls button, .controls label { background: #0a0f20; color: #e5e7eb; border: 1px solid #374151; border-radius: 8px; padding: 6px 10px; cursor: pointer; }
-    .chart { height: calc(100vh - 100px); }
-    .levels { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas; font-size: 13px; display: grid; gap: 6px; }
-    .levels .key { color: #93c5fd; }
-    .actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 10px; }
-    .actions button { padding: 8px; border-radius: 8px; border: 0; color: white; font-weight: 600; cursor: pointer; }
-    .buy { background: #16a34a; }
-    .sell { background: #dc2626; }
-    .tp { background: #14b8a6; }
-    .be { background: #6b7280; }
-    .small { font-size: 12px; color: #94a3b8; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji'; margin: 0; padding: 0; }
+    header { padding: 16px; background: #0f172a; color: white; }
+    main { padding: 20px; max-width: 960px; margin: 0 auto; }
+    .card { background: #0b1022; color: #e5e7eb; border: 1px solid #1f2937; border-radius: 10px; padding: 16px; box-shadow: 0 6px 24px rgba(0,0,0,0.25); }
+    label { display: block; font-weight: 600; margin-top: 12px; }
+    input, textarea { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #374151; background: #0a0f20; color: #e5e7eb; }
+    input::placeholder { color: #94a3b8; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    button { margin-top: 14px; padding: 10px 16px; border: 0; border-radius: 8px; background: #2563eb; color: white; font-weight: 600; cursor: pointer; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    pre { white-space: pre-wrap; word-break: break-word; background: #0a0f20; border: 1px solid #374151; padding: 12px; border-radius: 8px; overflow: auto; max-height: 60vh; }
+    .meta { color: #93c5fd; font-size: 0.9rem; margin-top: 8px; }
+    .error { color: #fecaca; font-weight: 600; }
+    a { color: #93c5fd; }
   </style>
 </head>
 <body>
   <header>
-    <div class="row">
-      <input id="search" placeholder="Search ticker (AAPL, TSLA)" />
-      <button id="add">Add</button>
-    </div>
-    <div class="row">
-      <button data-tf="1m">1 m</button>
-      <button data-tf="15m">15 m</button>
-      <button data-tf="1h">1 h</button>
-      <button data-tf="day">day</button>
-      <button data-tf="month">month</button>
-    </div>
-    <div class="row">
-      <label style="display:flex;align-items:center;gap:6px; padding: 6px 10px; border:1px solid #374151; border-radius:8px;">
-        <input type="checkbox" id="sessionOnly" /> Regular-hours only
-      </label>
-      <label style="display:flex;align-items:center;gap:6px; padding: 6px 10px; border:1px solid #374151; border-radius:8px;">
-        Range:
-        <select id="rangeSel" style="background:#0a0f20;color:#e5e7eb;border:1px solid #374151;border-radius:6px;padding:4px 6px;">
-          <option value="5d">5d</option>
-          <option value="1m">1m</option>
-          <option value="3m">3m</option>
-          <option value="6m">6m</option>
-          <option value="1y">1y</option>
-          <option value="max">max</option>
-        </select>
-      </label>
-    </div>
-    <div class="row" style="margin-left:auto;">
-      <input id="apiKey" placeholder="Polygon API key (optional)" style="width: 320px;" />
-      <button id="saveKey">Save key</button>
-    </div>
+    <h1>GitHub File Reader</h1>
   </header>
   <main>
-    <aside>
-      <div class="small">Watch-list</div>
-      <div id="watch" class="watchlist"></div>
-    </aside>
-    <section>
-      <div class="controls">
-        <div class="small" id="active"></div>
-        <div id="msg" class="small" style="margin-left:auto;color:#fca5a5;"></div>
+    <div class="card">
+      <p>Enter a GitHub file URL (blob or raw). For private repos, provide a GitHub token.</p>
+      <div class="row">
+        <div>
+          <label for="url">File URL</label>
+          <input id="url" type="url" placeholder="e.g. https://github.com/owner/repo/blob/main/README.md" />
+        </div>
+        <div>
+          <label for="token">GitHub Token (optional)</label>
+          <input id="token" type="password" placeholder="ghp_..." />
+        </div>
       </div>
-      <div id="chart" class="chart"></div>
-    </section>
-    <section class="panel">
-      <div class="small">Levels</div>
-      <div class="levels" id="levels"></div>
-      <div class="small" style="margin-top:10px;">Strategy helpers</div>
-      <div class="actions">
-        <button class="buy" data-line="buy">Buy</button>
-        <button class="sell" data-line="sell">Sell</button>
-        <button class="tp" data-line="tp">Take-profit</button>
-        <button class="be" data-line="be">Break-even</button>
+      <button id="fetch">Fetch File</button>
+      <div id="status" class="meta"></div>
+      <div id="error" class="error"></div>
+      <div id="result" style="display:none;">
+        <div class="meta">File: <span id="fileName"></span> • Size: <span id="size"></span> • Source: <span id="source"></span></div>
+        <pre id="content"></pre>
       </div>
-    </section>
+      <p class="meta">Tip: If you only have a repo URL like <code>https://github.com/usamaasif1/muffin</code>, add <code>/blob/main/README.md</code> (or <code>master</code>).</p>
+    </div>
   </main>
-
   <script>
-    const els = id => document.getElementById(id);
-    const watchEl = els('watch');
-    const levelsEl = els('levels');
-    const activeEl = els('active');
-    const searchEl = els('search');
+    const el = (id) => document.getElementById(id);
+    const btn = el('fetch');
 
-    function getApiKey() { return localStorage.getItem('muffin.apiKey'); }
-    function setApiKey(v) { if (v) localStorage.setItem('muffin.apiKey', v); else localStorage.removeItem('muffin.apiKey'); }
-
-    const state = {
-      symbol: 'AAPL',
-      timespan: '15m',
-      window: '5d',
-      candles: [],
-      watch: JSON.parse(localStorage.getItem('muffin.watch') || '[]'),
-      priceLines: [],
-    };
-
-    function authHeaders() {
-      const key = getApiKey();
-      return key ? { 'X-API-KEY': key } : {};
-    }
-
-    function saveWatch() { localStorage.setItem('muffin.watch', JSON.stringify(state.watch)); }
-
-    function renderWatch() {
-      watchEl.innerHTML = '';
-      state.watch.forEach(item => {
-        const div = document.createElement('div');
-        div.className = 'watch-item';
-        const badge = (typeof item.move === 'number') ? `${item.move.toFixed(1)}%` : (typeof item.move === 'string' ? item.move : '');
-        div.innerHTML = `<span>${item.symbol}</span> <span class="badge">${badge}</span>`;
-        div.onclick = () => { loadSymbol(item.symbol); };
-        watchEl.appendChild(div);
-      });
-    }
-
-    async function searchSymbols(q) {
-      const resp = await fetch(`/api/search?q=${encodeURIComponent(q)}`, { headers: authHeaders() });
-      if (!resp.ok) return [];
-      const data = await resp.json();
-      return data.items || [];
-    }
-
-    async function fetchCandles(symbol, timespan, window) {
-      const resp = await fetch(`/api/candles?symbol=${encodeURIComponent(symbol)}&timespan=${timespan}&window=${window}`, { headers: authHeaders() });
-      if (!resp.ok) {
-        const txt = await resp.text().catch(()=> '');
-        throw new Error('Failed to get candles: ' + txt);
-      }
-      const data = await resp.json();
-      return data.candles || [];
-    }
-
-    function tzNYDate(ms) {
-      const opt = { hour: '2-digit', minute: '2-digit', timeZone: 'America/New_York', hour12: false };
-      const fmt = new Intl.DateTimeFormat('en-US', opt).format(new Date(ms));
-      return fmt; // HH:MM
-    }
-
-    function isRegularHours(ms) {
-      const [hh, mm] = tzNYDate(ms).split(':').map(Number);
-      const mins = hh * 60 + mm;
-      return mins >= (9 * 60 + 30) && mins <= (16 * 60);
-    }
-
-    function computeLevels(candles) {
-      if (!candles.length) return null;
-      const prices = candles.map(c => c.c);
-      const min = Math.min(...prices);
-      const max = Math.max(...prices);
-      const avg = prices.reduce((a, b) => a + b, 0) / prices.length;
-      const mid = (min + max) / 2;
-
-      // L.M.L / L.M.H over last 30 days from last candle
-      const lastTs = candles[candles.length - 1].t;
-      const cutoff = lastTs - 30 * 24 * 60 * 60 * 1000;
-      const lastMonth = candles.filter(c => c.t >= cutoff);
-      const lml = Math.min(...lastMonth.map(c => c.l));
-      const lmh = Math.max(...lastMonth.map(c => c.h));
-
-      // P.P.M.L / P.P.M.H previous calendar month
-      const d = new Date(lastTs);
-      const prevMonthEnd = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 0, 23, 59, 59));
-      const prevMonthStart = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1, 0, 0, 0));
-      const pp = candles.filter(c => c.t >= prevMonthStart.getTime() && c.t <= prevMonthEnd.getTime());
-      const ppml = pp.length ? Math.min(...pp.map(c => c.l)) : null;
-      const ppmh = pp.length ? Math.max(...pp.map(c => c.h)) : null;
-
-      return { min, max, avg, mid, lml, lmh, ppml, ppmh };
-    }
-
-    let chart, series;
-    function ensureChart() {
-      if (chart) return;
-      chart = LightweightCharts.createChart(document.getElementById('chart'), {
-        layout: { background: { color: '#0b1022' }, textColor: '#e5e7eb' },
-        rightPriceScale: { borderColor: '#1f2937' },
-        timeScale: { borderColor: '#1f2937', timeVisible: true, secondsVisible: false },
-        grid: { vertLines: { color: '#111827' }, horzLines: { color: '#111827' } }
-      });
-      series = chart.addCandlestickSeries({ upColor: '#0ec07f', downColor: '#ff4d4f', borderDownColor: '#ff4d4f', borderUpColor: '#0ec07f', wickDownColor: '#ff4d4f', wickUpColor: '#0ec07f' });
-    }
-
-    function clearPriceLines() {
-      (state.priceLines || []).forEach(pl => series.removePriceLine(pl));
-      state.priceLines = [];
-    }
-
-    function addHelperLine(kind, price) {
-      const colors = { buy: '#16a34a', sell: '#dc2626', tp: '#14b8a6', be: '#6b7280' };
-      const pl = series.createPriceLine({ price, color: colors[kind], lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: kind.toUpperCase() });
-      state.priceLines.push(pl);
-    }
-
-    function setLevelsUI(levels) {
-      if (!levels) { levelsEl.innerHTML = ''; return; }
-      const fmt = x => x?.toFixed(2);
-      levelsEl.innerHTML = `
-        <div><span class="key">Min</span>: ${fmt(levels.min)}</div>
-        <div><span class="key">Max</span>: ${fmt(levels.max)}</div>
-        <div><span class="key">Avg</span>: ${fmt(levels.avg)}</div>
-        <div><span class="key">Mid</span>: ${fmt(levels.mid)}</div>
-        <div><span class="key">L.M.L</span>: ${fmt(levels.lml)}</div>
-        <div><span class="key">L.M.H</span>: ${fmt(levels.lmh)}</div>
-        <div><span class="key">P.P.M.L</span>: ${levels.ppml != null ? fmt(levels.ppml) : '—'}</div>
-        <div><span class="key">P.P.M.H</span>: ${levels.ppmh != null ? fmt(levels.ppmh) : '—'}</div>
-      `;
-    }
-
-    function setLevelLines(levels) {
-      clearPriceLines();
-      if (!levels) return;
-      const add = (price, color, title) => {
-        const pl = series.createPriceLine({ price, color, lineWidth: 1, lineStyle: 1, axisLabelVisible: true, title });
-        state.priceLines.push(pl);
-      };
-      add(levels.lml, '#94a3b8', 'L.M.L');
-      add(levels.lmh, '#94a3b8', 'L.M.H');
-      if (levels.ppml != null) add(levels.ppml, '#38bdf8', 'P.P.M.L');
-      if (levels.ppmh != null) add(levels.ppmh, '#38bdf8', 'P.P.M.H');
-    }
-
-    function filterSession(candles) {
-      if (!els('sessionOnly').checked) return candles;
-      return candles.filter(c => isRegularHours(c.t));
-    }
-
-    function toSeries(c) { return { time: Math.floor(c.t / 1000), open: c.o, high: c.h, low: c.l, close: c.c }; }
-
-    async function loadSymbol(symbol) {
-      state.symbol = symbol.toUpperCase();
-      activeEl.textContent = `${state.symbol} • ${state.timespan} • ${state.window}`;
-      els('msg').textContent = '';
-      ensureChart();
+    btn.addEventListener('click', async () => {
+      const url = el('url').value.trim();
+      const token = el('token').value.trim();
+      el('error').textContent = '';
+      el('status').textContent = '';
+      el('result').style.display = 'none';
+      if (!url) { el('error').textContent = 'Please provide a GitHub file URL.'; return; }
+      btn.disabled = true; btn.textContent = 'Fetching...';
       try {
-        const raw = await fetchCandles(state.symbol, state.timespan, state.window);
-        state.candles = raw;
-        const visible = filterSession(raw);
-        series.setData(visible.map(toSeries));
-        const lv = computeLevels(visible);
-        setLevelsUI(lv);
-        setLevelLines(lv);
-        updateWatchBadges();
-      } catch (e) {
-        els('msg').textContent = String(e.message || e);
-      }
-    }
-
-    async function updateWatchBadges() {
-      const symbols = state.watch.map(x => x.symbol);
-      if (!symbols.length) return;
-      try {
-        const resp = await fetch('/api/bigmovers', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ symbols, window: state.window, timespan: state.timespan, threshold: -1 }) });
+        const resp = await fetch('/api/read-github-file', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, token: token || null })
+        });
         const data = await resp.json();
-        const pctMap = Object.fromEntries((data.movers || []).map(m => [m.symbol, m.change_pct]));
-        state.watch = state.watch.map(w => ({ ...w, move: (pctMap[w.symbol] != null ? pctMap[w.symbol] : w.move) }));
-        renderWatch();
-      } catch {}
-    }
-
-    // Event handlers
-    document.querySelectorAll('button[data-tf]').forEach(btn => {
-      btn.onclick = async () => { state.timespan = btn.getAttribute('data-tf'); await loadSymbol(state.symbol); };
-    });
-
-    els('rangeSel').onchange = async () => { state.window = els('rangeSel').value; await loadSymbol(state.symbol); };
-
-    els('sessionOnly').onchange = async () => { await loadSymbol(state.symbol); };
-
-    document.querySelectorAll('.actions button').forEach(btn => {
-      btn.onclick = () => {
-        if (!state.candles.length) return;
-        const price = state.candles[state.candles.length - 1].c;
-        addHelperLine(btn.dataset.line, price);
-      };
-    });
-
-    els('add').onclick = async () => {
-      const q = searchEl.value.trim(); if (!q) return;
-      let symbol = q.toUpperCase();
-      if (!/^[A-Z.\-]+$/.test(symbol)) {
-        const items = await searchSymbols(q);
-        if (!items.length) return alert('No results');
-        symbol = items[0].symbol.toUpperCase();
+        if (!resp.ok) throw new Error(data?.detail || 'Request failed');
+        el('fileName').textContent = data.file_name;
+        el('size').textContent = new Intl.NumberFormat().format(data.size_bytes) + ' bytes';
+        el('source').textContent = data.source;
+        el('content').textContent = data.content;
+        el('result').style.display = 'block';
+        el('status').textContent = 'Success';
+      } catch (err) {
+        el('error').textContent = String(err.message || err);
+      } finally {
+        btn.disabled = false; btn.textContent = 'Fetch File';
       }
-      if (!state.watch.find(x => x.symbol === symbol)) { state.watch.push({ symbol }); saveWatch(); renderWatch(); }
-      loadSymbol(symbol);
-    };
-
-    els('saveKey').onclick = () => {
-      const v = els('apiKey').value.trim();
-      setApiKey(v || null);
-      updateWatchBadges();
-      if (state.symbol) loadSymbol(state.symbol);
-    };
-
-    // Initial
-    els('rangeSel').value = state.window;
-    els('apiKey').value = getApiKey() || '';
-    if (!state.watch.length) { state.watch = [{ symbol: 'AAPL' }, { symbol: 'TSLA' }]; saveWatch(); }
-    renderWatch();
-    loadSymbol(state.watch[0].symbol);
+    });
   </script>
 </body>
 </html>
