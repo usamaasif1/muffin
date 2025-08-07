@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AAPL Chart (Simple)</title>
+  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+  <style>
+    html, body { height: 100%; margin: 0; background: #0b1022; color: #e5e7eb; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto; }
+    #wrap { display: flex; flex-direction: column; height: 100%; }
+    header { padding: 10px 14px; border-bottom: 1px solid #1f2937; background: #0f172a; }
+    main { flex: 1; }
+    #chart { width: 100%; height: calc(100vh - 54px); }
+    #msg { padding: 6px 12px; color: #fca5a5; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <header>
+      <div>AAPL • 15m • 5d</div>
+    </header>
+    <div id="msg"></div>
+    <main>
+      <div id="chart"></div>
+    </main>
+  </div>
+
+  <script>
+    const msg = document.getElementById('msg');
+
+    function showError(text) {
+      msg.textContent = text || '';
+    }
+
+    async function load() {
+      try {
+        // Ensure chart lib exists
+        if (!window.LightweightCharts || typeof window.LightweightCharts.createChart !== 'function') {
+          throw new Error('Chart library failed to load.');
+        }
+        // Create chart
+        const chart = window.LightweightCharts.createChart(document.getElementById('chart'), {
+          layout: { background: { color: '#0b1022' }, textColor: '#e5e7eb' },
+          rightPriceScale: { borderColor: '#1f2937' },
+          timeScale: { borderColor: '#1f2937', timeVisible: true, secondsVisible: false },
+          grid: { vertLines: { color: '#111827' }, horzLines: { color: '#111827' } }
+        });
+        if (!chart || typeof chart.addCandlestickSeries !== 'function') {
+          throw new Error('Chart API not ready.');
+        }
+        const series = chart.addCandlestickSeries({
+          upColor: '#0ec07f', downColor: '#ff4d4f',
+          borderDownColor: '#ff4d4f', borderUpColor: '#0ec07f',
+          wickDownColor: '#ff4d4f', wickUpColor: '#0ec07f'
+        });
+
+        // Fetch AAPL candles (server uses your API key from env)
+        const resp = await fetch('/api/candles?symbol=AAPL&timespan=15m&window=5d');
+        if (!resp.ok) {
+          const txt = await resp.text().catch(()=> '');
+          throw new Error('Failed to get candles: ' + txt);
+        }
+        const data = await resp.json();
+        const candles = (data.candles || []).map(c => ({
+          time: Math.floor(c.t / 1000), open: c.o, high: c.h, low: c.l, close: c.c
+        }));
+        if (!candles.length) throw new Error('No candles returned.');
+        series.setData(candles);
+      } catch (e) {
+        showError(String(e && e.message ? e.message : e));
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', load);
+  </script>
+</body>
+</html>
