@@ -60,14 +60,14 @@
     const addBtn = document.getElementById('add');
     const watchEl = document.getElementById('watch');
 
-    const state = { symbol: 'AAPL', timespan: '15m', window: 'max', chart: null, seriesPre: null, seriesReg: null, seriesPost: null, watch: JSON.parse(localStorage.getItem('simple.watch') || '[]') };
+    const state = { symbol: 'AAPL', timespan: '15m', window: 'max', chart: null, series: null, watch: JSON.parse(localStorage.getItem('simple.watch') || '[]'), levelLines: [] };
 
     function showError(text) {
       msg.textContent = text || '';
     }
 
     async function ensureChart() {
-      if (state.chart && state.seriesPre && state.seriesReg && state.seriesPost) return;
+      if (state.chart && state.series) return;
       if (!window.LightweightCharts || typeof window.LightweightCharts.createChart !== 'function') {
         throw new Error('Chart library failed to load.');
       }
@@ -80,14 +80,8 @@
       if (!state.chart || typeof state.chart.addCandlestickSeries !== 'function') {
         throw new Error('Chart API not ready.');
       }
-      state.seriesPre = state.chart.addCandlestickSeries({
-        upColor: '#60a5fa', downColor: '#60a5fa', borderUpColor: '#60a5fa', borderDownColor: '#60a5fa', wickUpColor: '#60a5fa', wickDownColor: '#60a5fa'
-      });
-      state.seriesReg = state.chart.addCandlestickSeries({
+      state.series = state.chart.addCandlestickSeries({
         upColor: '#0ec07f', downColor: '#ff4d4f', borderDownColor: '#ff4d4f', borderUpColor: '#0ec07f', wickDownColor: '#ff4d4f', wickUpColor: '#0ec07f'
-      });
-      state.seriesPost = state.chart.addCandlestickSeries({
-        upColor: '#a78bfa', downColor: '#a78bfa', borderUpColor: '#a78bfa', borderDownColor: '#a78bfa', wickUpColor: '#a78bfa', wickDownColor: '#a78bfa'
       });
     }
 
@@ -102,18 +96,41 @@
       return (data.candles || []).map(c => ({ time: Math.floor(c.t / 1000), open: c.o, high: c.h, low: c.l, close: c.c, t: c.t }));
     }
 
-    function nyMinutes(ms) {
-      const opt = { hour: '2-digit', minute: '2-digit', timeZone: 'America/New_York', hour12: false };
-      const [hh, mm] = new Intl.DateTimeFormat('en-US', opt).format(new Date(ms)).split(':').map(Number);
-      return hh * 60 + mm;
+    function clearLevelLines() {
+      (state.levelLines || []).forEach(pl => state.series?.removePriceLine(pl));
+      state.levelLines = [];
     }
 
-    function sessionOf(ms) {
-      const m = nyMinutes(ms);
-      if (m >= 570 && m <= 960) return 'reg'; // 09:30 - 16:00
-      if (m >= 240 && m < 570) return 'pre';  // 04:00 - 09:29
-      if (m > 960 && m <= 1200) return 'post'; // 16:01 - 20:00
-      return 'post';
+    function addLevel(price, color, title) {
+      if (!state.series || price == null || isNaN(price)) return;
+      const pl = state.series.createPriceLine({ price, color, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title });
+      state.levelLines.push(pl);
+    }
+
+    function monthRange(year, month) {
+      const start = Date.UTC(year, month, 1, 0, 0, 0);
+      const end = Date.UTC(year, month + 1, 0, 23, 59, 59);
+      return [start, end];
+    }
+
+    function computeMonthlyLevels(candles) {
+      if (!candles.length) return null;
+      const d = new Date(candles[candles.length - 1].t);
+      let y = d.getUTCFullYear();
+      let m = d.getUTCMonth();
+      // last month (previous calendar month)
+      let lmY = y, lmM = m - 1; if (lmM < 0) { lmM = 11; lmY -= 1; }
+      const [lmStart, lmEnd] = monthRange(lmY, lmM);
+      const lmC = candles.filter(c => c.t >= lmStart && c.t <= lmEnd);
+      const lml = lmC.length ? Math.min(...lmC.map(c => c.low)) : null;
+      const lmh = lmC.length ? Math.max(...lmC.map(c => c.high)) : null;
+      // previous previous month
+      let ppmY = lmY, ppmM = lmM - 1; if (ppmM < 0) { ppmM = 11; ppmY -= 1; }
+      const [ppmStart, ppmEnd] = monthRange(ppmY, ppmM);
+      const ppmC = candles.filter(c => c.t >= ppmStart && c.t <= ppmEnd);
+      const ppml = ppmC.length ? Math.min(...ppmC.map(c => c.low)) : null;
+      const ppmh = ppmC.length ? Math.max(...ppmC.map(c => c.high)) : null;
+      return { lml, lmh, ppml, ppmh };
     }
 
     async function loadSymbol(symbol) {
@@ -122,15 +139,15 @@
         await ensureChart();
         const candles = await fetchCandles(symbol);
         if (!candles.length) throw new Error('No candles returned.');
-        const pre = [], reg = [], post = [];
-        for (const c of candles) {
-          const item = { time: c.time, open: c.open, high: c.high, low: c.low, close: c.close };
-          const sess = sessionOf(c.t);
-          if (sess === 'reg') reg.push(item); else if (sess === 'pre') pre.push(item); else post.push(item);
+        state.series.setData(candles.map(c => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })));
+        clearLevelLines();
+        const lv = computeMonthlyLevels(candles);
+        if (lv) {
+          if (lv.lml != null) addLevel(lv.lml, '#94a3b8', 'L.M.L');
+          if (lv.lmh != null) addLevel(lv.lmh, '#94a3b8', 'L.M.H');
+          if (lv.ppml != null) addLevel(lv.ppml, '#38bdf8', 'P.P.M.L');
+          if (lv.ppmh != null) addLevel(lv.ppmh, '#38bdf8', 'P.P.M.H');
         }
-        state.seriesPre.setData(pre);
-        state.seriesReg.setData(reg);
-        state.seriesPost.setData(post);
         state.symbol = symbol.toUpperCase();
         title.textContent = `${state.symbol} • ${state.timespan}`;
         renderWatch();
