@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Optional, List
 
 from fastapi import FastAPI, HTTPException, Header, Query
@@ -18,8 +19,17 @@ from backend.services.market_data import (
     search_symbols,
 )
 
-# Load environment variables from .env if present
-load_dotenv()
+# Load environment variables from .env if present (try repo root and app root)
+_here = Path(__file__).resolve()
+_candidates = [
+    _here.parents[2] / ".env",  # repo root (../../.. from this file)
+    _here.parents[1] / ".env",  # backend/.. = app root
+    Path.cwd() / ".env",
+]
+for _env in _candidates:
+    if _env.is_file():
+        load_dotenv(dotenv_path=str(_env))
+        break
 
 
 class ReadGithubRequest(BaseModel):

@@ -74,6 +74,7 @@
     <section>
       <div class="controls">
         <div class="small" id="active"></div>
+        <div id="msg" class="small" style="margin-left:auto;color:#fca5a5;"></div>
       </div>
       <div id="chart" class="chart"></div>
     </section>
@@ -137,7 +138,10 @@
 
     async function fetchCandles(symbol, timespan, window) {
       const resp = await fetch(`/api/candles?symbol=${encodeURIComponent(symbol)}&timespan=${timespan}&window=${window}`, { headers: authHeaders() });
-      if (!resp.ok) throw new Error('Failed to get candles');
+      if (!resp.ok) {
+        const txt = await resp.text().catch(()=> '');
+        throw new Error('Failed to get candles: ' + txt);
+      }
       const data = await resp.json();
       return data.candles || [];
     }
@@ -241,15 +245,20 @@
     async function loadSymbol(symbol) {
       state.symbol = symbol.toUpperCase();
       activeEl.textContent = `${state.symbol} • ${state.timespan} • ${state.window}`;
+      els('msg').textContent = '';
       ensureChart();
-      const raw = await fetchCandles(state.symbol, state.timespan, state.window);
-      state.candles = raw;
-      const visible = filterSession(raw);
-      series.setData(visible.map(toSeries));
-      const lv = computeLevels(visible);
-      setLevelsUI(lv);
-      setLevelLines(lv);
-      updateWatchBadges();
+      try {
+        const raw = await fetchCandles(state.symbol, state.timespan, state.window);
+        state.candles = raw;
+        const visible = filterSession(raw);
+        series.setData(visible.map(toSeries));
+        const lv = computeLevels(visible);
+        setLevelsUI(lv);
+        setLevelLines(lv);
+        updateWatchBadges();
+      } catch (e) {
+        els('msg').textContent = String(e.message || e);
+      }
     }
 
     async function updateWatchBadges() {
