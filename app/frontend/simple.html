@@ -17,7 +17,7 @@
 <body>
   <div id="wrap">
     <header>
-      <div>AAPL • 15m • 5d</div>
+      <div>AAPL • 15m • max</div>
     </header>
     <div id="msg"></div>
     <main>
@@ -55,7 +55,7 @@
         });
 
         // Fetch AAPL candles (server uses your API key from env)
-        const resp = await fetch('/api/candles?symbol=AAPL&timespan=15m&window=5d');
+        const resp = await fetch('/api/candles?symbol=AAPL&timespan=15m&window=max');
         if (!resp.ok) {
           const txt = await resp.text().catch(()=> '');
           throw new Error('Failed to get candles: ' + txt);

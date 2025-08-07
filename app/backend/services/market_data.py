@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Literal, Optional, Tuple
 
 import requests
+from urllib.parse import urlencode
 
 Timespan = Literal["1m", "15m", "1h", "day", "month"]
 
@@ -110,33 +111,54 @@ def _fetch_candles_polygon(symbol: str, timespan: Timespan, window: str, key: st
         elif timespan == "1h":
             delta = dt.timedelta(days=730)  # ~2 years
         elif timespan == "day":
-            delta = dt.timedelta(days=365 * 5)  # ~5 years
+            delta = dt.timedelta(days=365 * 20)  # ~20 years for daily
         else:  # month
-            delta = dt.timedelta(days=365 * 20)  # ~20 years
+            delta = dt.timedelta(days=365 * 30)  # ~30 years
     else:
         delta = _parse_window(window)
     start = now - delta
+
     multiplier, unit = _polygon_timespan(timespan)
-    url = (
-        f"https://api.polygon.io/v2/aggs/ticker/{symbol.upper()}/range/{multiplier}/{unit}/"
-        f"{start.date().isoformat()}/{now.date().isoformat()}?adjusted=true&sort=asc&limit=50000&apiKey={key}"
-    )
-    resp = requests.get(url, timeout=30)
-    resp.raise_for_status()
-    data = resp.json()
-    results = data.get("results") or []
+
+    # Initial URL
+    base = f"https://api.polygon.io/v2/aggs/ticker/{symbol.upper()}/range/{multiplier}/{unit}/{start.date().isoformat()}/{now.date().isoformat()}"
+    params = {
+        "adjusted": "true",
+        "sort": "asc",
+        "limit": 50000,
+        "apiKey": key,
+    }
+    url = base + "?" + urlencode(params)
+
     candles: List[Candle] = []
-    for r in results:
-        candles.append(
-            Candle(
-                t=int(r["t"]),
-                o=float(r["o"]),
-                h=float(r["h"]),
-                l=float(r["l"]),
-                c=float(r["c"]),
-                v=float(r.get("v", 0.0)),
+    safety_pages = 0
+    while True:
+        resp = requests.get(url, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        results = data.get("results") or []
+        for r in results:
+            candles.append(
+                Candle(
+                    t=int(r["t"]),
+                    o=float(r["o"]),
+                    h=float(r["h"]),
+                    l=float(r["l"]),
+                    c=float(r["c"]),
+                    v=float(r.get("v", 0.0)),
+                )
             )
-        )
+        next_url = data.get("next_url") or data.get("nextUrl")
+        if not next_url:
+            break
+        # Polygon next_url may lack the apiKey
+        separator = "&" if "?" in next_url else "?"
+        url = f"{next_url}{separator}apiKey={key}"
+        safety_pages += 1
+        if safety_pages > 1000:
+            # Prevent runaway loops in pathological cases
+            break
+
     return candles
 
 
