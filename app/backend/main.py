@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from dotenv import load_dotenv
 
 from backend.services.github_reader import read_github_file
 from backend.services.market_data import (
@@ -16,6 +17,9 @@ from backend.services.market_data import (
     fetch_candles,
     search_symbols,
 )
+
+# Load environment variables from .env if present
+load_dotenv()
 
 
 class ReadGithubRequest(BaseModel):
