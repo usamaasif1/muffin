@@ -21,10 +21,18 @@
   <div id="wrap">
     <header>
       <div id="topbar">
-        <div id="title">AAPL • 15m • max</div>
+        <div id="title">AAPL • 15m</div>
         <input id="search" list="symbols" placeholder="Search ticker (AAPL, TSLA, apple)" />
         <datalist id="symbols"></datalist>
         <button id="go">Go</button>
+        <div style="margin-left:auto; display:flex; gap:6px;">
+          <button class="tf" data-tf="1m">1m</button>
+          <button class="tf" data-tf="5m">5m</button>
+          <button class="tf" data-tf="15m">15m</button>
+          <button class="tf" data-tf="1h">1h</button>
+          <button class="tf" data-tf="day">1d</button>
+          <button class="tf" data-tf="month">1mo</button>
+        </div>
       </div>
     </header>
     <div id="msg"></div>
@@ -68,7 +76,7 @@
     }
 
     async function fetchCandles(symbol) {
-      const url = `/api/candles?symbol=${encodeURIComponent(symbol)}&timespan=${state.timespan}&window=${state.window}`;
+      const url = `/api/candles?symbol=${encodeURIComponent(symbol)}&timespan=${state.timespan}&window=max`;
       const resp = await fetch(url);
       if (!resp.ok) {
         const txt = await resp.text().catch(()=> '');
@@ -86,7 +94,7 @@
         if (!candles.length) throw new Error('No candles returned.');
         state.series.setData(candles);
         state.symbol = symbol.toUpperCase();
-        title.textContent = `${state.symbol} • ${state.timespan} • ${state.window}`;
+        title.textContent = `${state.symbol} • ${state.timespan}`;
       } catch (e) {
         showError(String(e && e.message ? e.message : e));
       }
@@ -122,6 +130,13 @@
 
     goBtn.addEventListener('click', () => {
       const sym = search.value.trim(); if (sym) loadSymbol(sym);
+    });
+
+    document.querySelectorAll('.tf').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        state.timespan = btn.getAttribute('data-tf');
+        await loadSymbol(state.symbol);
+      });
     });
 
     window.addEventListener('DOMContentLoaded', () => loadSymbol('AAPL'));

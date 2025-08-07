@@ -8,7 +8,7 @@ from typing import Dict, List, Literal, Optional, Tuple
 import requests
 from urllib.parse import urlencode
 
-Timespan = Literal["1m", "15m", "1h", "day", "month"]
+Timespan = Literal["1m", "5m", "15m", "1h", "day", "month"]
 
 
 @dataclass
@@ -57,6 +57,8 @@ def _parse_window(window: str) -> dt.timedelta:
 def _polygon_timespan(timespan: Timespan) -> Tuple[int, str]:
     if timespan == "1m":
         return 1, "minute"
+    if timespan == "5m":
+        return 5, "minute"
     if timespan == "15m":
         return 15, "minute"
     if timespan == "1h":
@@ -72,6 +74,8 @@ def _yahoo_interval_and_range(timespan: Timespan, window: str) -> Tuple[str, str
     # Yahoo finance intervals: 1m,2m,5m,15m,30m,60m,90m,1d,5d,1wk,1mo,3mo
     if timespan == "1m":
         interval = "1m"
+    elif timespan == "5m":
+        interval = "5m"
     elif timespan == "15m":
         interval = "15m"
     elif timespan == "1h":
@@ -106,6 +110,8 @@ def _fetch_candles_polygon(symbol: str, timespan: Timespan, window: str, key: st
     if window == "max":
         if timespan == "1m":
             delta = dt.timedelta(days=30)  # 1-minute data: ~30 days
+        elif timespan == "5m":
+            delta = dt.timedelta(days=90)  # 5-minute data: ~3 months
         elif timespan == "15m":
             delta = dt.timedelta(days=180)  # ~6 months
         elif timespan == "1h":
