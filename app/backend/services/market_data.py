@@ -36,6 +36,9 @@ def _to_iso8601(date: dt.datetime) -> str:
 
 def _parse_window(window: str) -> dt.timedelta:
     # e.g., '5d', '30d', '1w', '1m' (month), '3m', '1y'
+    if window == "max":
+        # This path is handled in the caller that knows the timespan
+        raise ValueError("'max' window must be mapped per timespan before parsing")
     unit = window[-1]
     value = int(window[:-1])
     if unit == "d":
@@ -98,7 +101,20 @@ def fetch_candles(
 
 def _fetch_candles_polygon(symbol: str, timespan: Timespan, window: str, key: str) -> List[Candle]:
     now = dt.datetime.utcnow()
-    delta = _parse_window(window)
+    # Map 'max' to large ranges that Polygon can realistically serve
+    if window == "max":
+        if timespan == "1m":
+            delta = dt.timedelta(days=30)  # 1-minute data: ~30 days
+        elif timespan == "15m":
+            delta = dt.timedelta(days=180)  # ~6 months
+        elif timespan == "1h":
+            delta = dt.timedelta(days=730)  # ~2 years
+        elif timespan == "day":
+            delta = dt.timedelta(days=365 * 5)  # ~5 years
+        else:  # month
+            delta = dt.timedelta(days=365 * 20)  # ~20 years
+    else:
+        delta = _parse_window(window)
     start = now - delta
     multiplier, unit = _polygon_timespan(timespan)
     url = (

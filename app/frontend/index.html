@@ -49,6 +49,17 @@
       <label style="display:flex;align-items:center;gap:6px; padding: 6px 10px; border:1px solid #374151; border-radius:8px;">
         <input type="checkbox" id="sessionOnly" /> Regular-hours only
       </label>
+      <label style="display:flex;align-items:center;gap:6px; padding: 6px 10px; border:1px solid #374151; border-radius:8px;">
+        Range:
+        <select id="rangeSel" style="background:#0a0f20;color:#e5e7eb;border:1px solid #374151;border-radius:6px;padding:4px 6px;">
+          <option value="5d">5d</option>
+          <option value="1m">1m</option>
+          <option value="3m">3m</option>
+          <option value="6m">6m</option>
+          <option value="1y">1y</option>
+          <option value="max">max</option>
+        </select>
+      </label>
     </div>
     <div class="row" style="margin-left:auto;">
       <input id="apiKey" placeholder="Polygon API key (optional)" style="width: 320px;" />
@@ -110,7 +121,8 @@
       state.watch.forEach(item => {
         const div = document.createElement('div');
         div.className = 'watch-item';
-        div.innerHTML = `<span>${item.symbol}</span> <span class="badge">${item.move ?? ''}</span>`;
+        const badge = (typeof item.move === 'number') ? `${item.move.toFixed(1)}%` : (typeof item.move === 'string' ? item.move : '');
+        div.innerHTML = `<span>${item.symbol}</span> <span class="badge">${badge}</span>`;
         div.onclick = () => { loadSymbol(item.symbol); };
         watchEl.appendChild(div);
       });
@@ -247,7 +259,7 @@
         const resp = await fetch('/api/bigmovers', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ symbols, window: state.window, timespan: state.timespan, threshold: -1 }) });
         const data = await resp.json();
         const pctMap = Object.fromEntries((data.movers || []).map(m => [m.symbol, m.change_pct]));
-        state.watch = state.watch.map(w => ({ ...w, move: pctMap[w.symbol]?.toFixed(1) + '%' }));
+        state.watch = state.watch.map(w => ({ ...w, move: (pctMap[w.symbol] != null ? pctMap[w.symbol] : w.move) }));
         renderWatch();
       } catch {}
     }
@@ -256,6 +268,8 @@
     document.querySelectorAll('button[data-tf]').forEach(btn => {
       btn.onclick = async () => { state.timespan = btn.getAttribute('data-tf'); await loadSymbol(state.symbol); };
     });
+
+    els('rangeSel').onchange = async () => { state.window = els('rangeSel').value; await loadSymbol(state.symbol); };
 
     els('sessionOnly').onchange = async () => { await loadSymbol(state.symbol); };
 
@@ -287,6 +301,7 @@
     };
 
     // Initial
+    els('rangeSel').value = state.window;
     els('apiKey').value = getApiKey() || '';
     if (!state.watch.length) { state.watch = [{ symbol: 'AAPL' }, { symbol: 'TSLA' }]; saveWatch(); }
     renderWatch();
