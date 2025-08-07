@@ -109,13 +109,13 @@ def _fetch_candles_polygon(symbol: str, timespan: Timespan, window: str, key: st
     # Map 'max' to large ranges that Polygon can realistically serve
     if window == "max":
         if timespan == "1m":
-            delta = dt.timedelta(days=30)  # 1-minute data: ~30 days
+            delta = dt.timedelta(days=730)  # ~2 years of 1-minute bars
         elif timespan == "5m":
-            delta = dt.timedelta(days=90)  # 5-minute data: ~3 months
+            delta = dt.timedelta(days=1825)  # ~5 years of 5-minute bars
         elif timespan == "15m":
-            delta = dt.timedelta(days=180)  # ~6 months
+            delta = dt.timedelta(days=3650)  # ~10 years of 15-minute bars
         elif timespan == "1h":
-            delta = dt.timedelta(days=730)  # ~2 years
+            delta = dt.timedelta(days=7300)  # ~20 years of hourly bars
         elif timespan == "day":
             delta = dt.timedelta(days=365 * 20)  # ~20 years for daily
         else:  # month
