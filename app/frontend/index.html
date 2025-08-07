@@ -99,6 +99,35 @@
     const activeEl = els('active');
     const searchEl = els('search');
 
+    async function ensureChartLib() {
+      if (window.LightweightCharts && typeof window.LightweightCharts.createChart === 'function') {
+        return;
+      }
+      // Try loading a pinned version
+      const urls = [
+        'https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js',
+        'https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js'
+      ];
+      for (const src of urls) {
+        try {
+          await new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = src;
+            s.async = true;
+            s.onload = () => resolve();
+            s.onerror = () => reject(new Error('Failed to load ' + src));
+            document.head.appendChild(s);
+          });
+          if (window.LightweightCharts && typeof window.LightweightCharts.createChart === 'function') {
+            return;
+          }
+        } catch (e) {
+          // try next url
+        }
+      }
+      throw new Error('Chart library failed to load. Check your network or try disabling extensions that block CDNs.');
+    }
+
     function getApiKey() { return localStorage.getItem('muffin.apiKey'); }
     function setApiKey(v) { if (v) localStorage.setItem('muffin.apiKey', v); else localStorage.removeItem('muffin.apiKey'); }
 
@@ -167,14 +196,12 @@
       const avg = prices.reduce((a, b) => a + b, 0) / prices.length;
       const mid = (min + max) / 2;
 
-      // L.M.L / L.M.H over last 30 days from last candle
       const lastTs = candles[candles.length - 1].t;
       const cutoff = lastTs - 30 * 24 * 60 * 60 * 1000;
       const lastMonth = candles.filter(c => c.t >= cutoff);
       const lml = Math.min(...lastMonth.map(c => c.l));
       const lmh = Math.max(...lastMonth.map(c => c.h));
 
-      // P.P.M.L / P.P.M.H previous calendar month
       const d = new Date(lastTs);
       const prevMonthEnd = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 0, 23, 59, 59));
       const prevMonthStart = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1, 0, 0, 0));
@@ -186,23 +213,30 @@
     }
 
     let chartApi, candleSeries;
-    function ensureChart() {
+    async function ensureChart() {
+      await ensureChartLib();
       if (chartApi && candleSeries) return;
-      chartApi = LightweightCharts.createChart(document.getElementById('chart'), {
+      const container = els('chart');
+      if (!container) throw new Error('Chart container not found');
+      chartApi = window.LightweightCharts.createChart(container, {
         layout: { background: { color: '#0b1022' }, textColor: '#e5e7eb' },
         rightPriceScale: { borderColor: '#1f2937' },
         timeScale: { borderColor: '#1f2937', timeVisible: true, secondsVisible: false },
         grid: { vertLines: { color: '#111827' }, horzLines: { color: '#111827' } }
       });
+      if (!chartApi || typeof chartApi.addCandlestickSeries !== 'function') {
+        throw new Error('Chart API not ready (addCandlestickSeries missing).');
+      }
       candleSeries = chartApi.addCandlestickSeries({ upColor: '#0ec07f', downColor: '#ff4d4f', borderDownColor: '#ff4d4f', borderUpColor: '#0ec07f', wickDownColor: '#ff4d4f', wickUpColor: '#0ec07f' });
     }
 
     function clearPriceLines() {
-      (state.priceLines || []).forEach(pl => candleSeries.removePriceLine(pl));
+      (state.priceLines || []).forEach(pl => candleSeries?.removePriceLine(pl));
       state.priceLines = [];
     }
 
     function addHelperLine(kind, price) {
+      if (!candleSeries) return;
       const colors = { buy: '#16a34a', sell: '#dc2626', tp: '#14b8a6', be: '#6b7280' };
       const pl = candleSeries.createPriceLine({ price, color: colors[kind], lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: kind.toUpperCase() });
       state.priceLines.push(pl);
@@ -225,7 +259,7 @@
 
     function setLevelLines(levels) {
       clearPriceLines();
-      if (!levels) return;
+      if (!levels || !candleSeries) return;
       const add = (price, color, title) => {
         const pl = candleSeries.createPriceLine({ price, color, lineWidth: 1, lineStyle: 1, axisLabelVisible: true, title });
         state.priceLines.push(pl);
@@ -247,8 +281,8 @@
       state.symbol = symbol.toUpperCase();
       activeEl.textContent = `${state.symbol} • ${state.timespan} • ${state.window}`;
       els('msg').textContent = '';
-      ensureChart();
       try {
+        await ensureChart();
         const raw = await fetchCandles(state.symbol, state.timespan, state.window);
         state.candles = raw;
         const visible = filterSession(raw);
