@@ -12,12 +12,20 @@
     main { flex: 1; }
     #chart { width: 100%; height: calc(100vh - 54px); }
     #msg { padding: 6px 12px; color: #fca5a5; font-size: 13px; }
+    #topbar { display:flex; gap:10px; align-items:center; }
+    #search { width: 320px; padding: 8px 10px; border-radius: 8px; border: 1px solid #374151; background: #0a0f20; color: #e5e7eb; }
+    #go { padding: 8px 12px; border-radius: 8px; border: 1px solid #374151; background: #2563eb; color: white; cursor: pointer; }
   </style>
 </head>
 <body>
   <div id="wrap">
     <header>
-      <div>AAPL • 15m • max</div>
+      <div id="topbar">
+        <div id="title">AAPL • 15m • max</div>
+        <input id="search" list="symbols" placeholder="Search ticker (AAPL, TSLA, apple)" />
+        <datalist id="symbols"></datalist>
+        <button id="go">Go</button>
+      </div>
     </header>
     <div id="msg"></div>
     <main>
@@ -27,51 +35,96 @@
 
   <script>
     const msg = document.getElementById('msg');
+    const title = document.getElementById('title');
+    const search = document.getElementById('search');
+    const dl = document.getElementById('symbols');
+    const goBtn = document.getElementById('go');
+
+    const state = { symbol: 'AAPL', timespan: '15m', window: 'max', chart: null, series: null };
 
     function showError(text) {
       msg.textContent = text || '';
     }
 
-    async function load() {
-      try {
-        // Ensure chart lib exists
-        if (!window.LightweightCharts || typeof window.LightweightCharts.createChart !== 'function') {
-          throw new Error('Chart library failed to load.');
-        }
-        // Create chart
-        const chart = window.LightweightCharts.createChart(document.getElementById('chart'), {
-          layout: { background: { color: '#0b1022' }, textColor: '#e5e7eb' },
-          rightPriceScale: { borderColor: '#1f2937' },
-          timeScale: { borderColor: '#1f2937', timeVisible: true, secondsVisible: false },
-          grid: { vertLines: { color: '#111827' }, horzLines: { color: '#111827' } }
-        });
-        if (!chart || typeof chart.addCandlestickSeries !== 'function') {
-          throw new Error('Chart API not ready.');
-        }
-        const series = chart.addCandlestickSeries({
-          upColor: '#0ec07f', downColor: '#ff4d4f',
-          borderDownColor: '#ff4d4f', borderUpColor: '#0ec07f',
-          wickDownColor: '#ff4d4f', wickUpColor: '#0ec07f'
-        });
+    async function ensureChart() {
+      if (state.chart && state.series) return;
+      if (!window.LightweightCharts || typeof window.LightweightCharts.createChart !== 'function') {
+        throw new Error('Chart library failed to load.');
+      }
+      state.chart = window.LightweightCharts.createChart(document.getElementById('chart'), {
+        layout: { background: { color: '#0b1022' }, textColor: '#e5e7eb' },
+        rightPriceScale: { borderColor: '#1f2937' },
+        timeScale: { borderColor: '#1f2937', timeVisible: true, secondsVisible: false },
+        grid: { vertLines: { color: '#111827' }, horzLines: { color: '#111827' } }
+      });
+      if (!state.chart || typeof state.chart.addCandlestickSeries !== 'function') {
+        throw new Error('Chart API not ready.');
+      }
+      state.series = state.chart.addCandlestickSeries({
+        upColor: '#0ec07f', downColor: '#ff4d4f',
+        borderDownColor: '#ff4d4f', borderUpColor: '#0ec07f',
+        wickDownColor: '#ff4d4f', wickUpColor: '#0ec07f'
+      });
+    }
 
-        // Fetch AAPL candles (server uses your API key from env)
-        const resp = await fetch('/api/candles?symbol=AAPL&timespan=15m&window=max');
-        if (!resp.ok) {
-          const txt = await resp.text().catch(()=> '');
-          throw new Error('Failed to get candles: ' + txt);
-        }
-        const data = await resp.json();
-        const candles = (data.candles || []).map(c => ({
-          time: Math.floor(c.t / 1000), open: c.o, high: c.h, low: c.l, close: c.c
-        }));
+    async function fetchCandles(symbol) {
+      const url = `/api/candles?symbol=${encodeURIComponent(symbol)}&timespan=${state.timespan}&window=${state.window}`;
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        const txt = await resp.text().catch(()=> '');
+        throw new Error('Failed to get candles: ' + txt);
+      }
+      const data = await resp.json();
+      return (data.candles || []).map(c => ({ time: Math.floor(c.t / 1000), open: c.o, high: c.h, low: c.l, close: c.c }));
+    }
+
+    async function loadSymbol(symbol) {
+      showError('');
+      try {
+        await ensureChart();
+        const candles = await fetchCandles(symbol);
         if (!candles.length) throw new Error('No candles returned.');
-        series.setData(candles);
+        state.series.setData(candles);
+        state.symbol = symbol.toUpperCase();
+        title.textContent = `${state.symbol} • ${state.timespan} • ${state.window}`;
       } catch (e) {
         showError(String(e && e.message ? e.message : e));
       }
     }
 
-    window.addEventListener('DOMContentLoaded', load);
+    async function searchSymbols(q) {
+      if (!q || q.length < 1) return [];
+      try {
+        const resp = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+        if (!resp.ok) return [];
+        const data = await resp.json();
+        return data.items || [];
+      } catch { return []; }
+    }
+
+    search.addEventListener('input', async () => {
+      const q = search.value.trim();
+      const items = await searchSymbols(q);
+      dl.innerHTML = '';
+      items.slice(0, 10).forEach(it => {
+        const opt = document.createElement('option');
+        opt.value = it.symbol;
+        opt.label = it.name || it.symbol;
+        dl.appendChild(opt);
+      });
+    });
+
+    search.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const sym = search.value.trim(); if (sym) loadSymbol(sym);
+      }
+    });
+
+    goBtn.addEventListener('click', () => {
+      const sym = search.value.trim(); if (sym) loadSymbol(sym);
+    });
+
+    window.addEventListener('DOMContentLoaded', () => loadSymbol('AAPL'));
   </script>
 </body>
 </html>
