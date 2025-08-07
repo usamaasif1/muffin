@@ -50,6 +50,10 @@
         <input type="checkbox" id="sessionOnly" /> Regular-hours only
       </label>
     </div>
+    <div class="row" style="margin-left:auto;">
+      <input id="apiKey" placeholder="Polygon API key (optional)" style="width: 320px;" />
+      <button id="saveKey">Save key</button>
+    </div>
   </header>
   <main>
     <aside>
@@ -82,7 +86,8 @@
     const activeEl = els('active');
     const searchEl = els('search');
 
-    const API_KEY = null; // optionally set your Polygon key here or leave null
+    function getApiKey() { return localStorage.getItem('muffin.apiKey'); }
+    function setApiKey(v) { if (v) localStorage.setItem('muffin.apiKey', v); else localStorage.removeItem('muffin.apiKey'); }
 
     const state = {
       symbol: 'AAPL',
@@ -92,6 +97,11 @@
       watch: JSON.parse(localStorage.getItem('muffin.watch') || '[]'),
       priceLines: [],
     };
+
+    function authHeaders() {
+      const key = getApiKey();
+      return key ? { 'X-API-KEY': key } : {};
+    }
 
     function saveWatch() { localStorage.setItem('muffin.watch', JSON.stringify(state.watch)); }
 
@@ -107,14 +117,14 @@
     }
 
     async function searchSymbols(q) {
-      const resp = await fetch(`/api/search?q=${encodeURIComponent(q)}`, { headers: API_KEY ? { 'X-API-KEY': API_KEY } : {} });
+      const resp = await fetch(`/api/search?q=${encodeURIComponent(q)}`, { headers: authHeaders() });
       if (!resp.ok) return [];
       const data = await resp.json();
       return data.items || [];
     }
 
     async function fetchCandles(symbol, timespan, window) {
-      const resp = await fetch(`/api/candles?symbol=${encodeURIComponent(symbol)}&timespan=${timespan}&window=${window}`, { headers: API_KEY ? { 'X-API-KEY': API_KEY } : {} });
+      const resp = await fetch(`/api/candles?symbol=${encodeURIComponent(symbol)}&timespan=${timespan}&window=${window}`, { headers: authHeaders() });
       if (!resp.ok) throw new Error('Failed to get candles');
       const data = await resp.json();
       return data.candles || [];
@@ -231,11 +241,10 @@
     }
 
     async function updateWatchBadges() {
-      // compute last %-move for watchlist using current timespan/window
       const symbols = state.watch.map(x => x.symbol);
       if (!symbols.length) return;
       try {
-        const resp = await fetch('/api/bigmovers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbols, window: state.window, timespan: state.timespan, threshold: -1, api_key: API_KEY }) });
+        const resp = await fetch('/api/bigmovers', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ symbols, window: state.window, timespan: state.timespan, threshold: -1 }) });
         const data = await resp.json();
         const pctMap = Object.fromEntries((data.movers || []).map(m => [m.symbol, m.change_pct]));
         state.watch = state.watch.map(w => ({ ...w, move: pctMap[w.symbol]?.toFixed(1) + '%' }));
@@ -260,7 +269,6 @@
 
     els('add').onclick = async () => {
       const q = searchEl.value.trim(); if (!q) return;
-      // if exact symbol exists, add; else, search API and pick first
       let symbol = q.toUpperCase();
       if (!/^[A-Z.\-]+$/.test(symbol)) {
         const items = await searchSymbols(q);
@@ -271,7 +279,15 @@
       loadSymbol(symbol);
     };
 
+    els('saveKey').onclick = () => {
+      const v = els('apiKey').value.trim();
+      setApiKey(v || null);
+      updateWatchBadges();
+      if (state.symbol) loadSymbol(state.symbol);
+    };
+
     // Initial
+    els('apiKey').value = getApiKey() || '';
     if (!state.watch.length) { state.watch = [{ symbol: 'AAPL' }, { symbol: 'TSLA' }]; saveWatch(); }
     renderWatch();
     loadSymbol(state.watch[0].symbol);
