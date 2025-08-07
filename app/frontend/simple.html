@@ -9,12 +9,17 @@
     html, body { height: 100%; margin: 0; background: #0b1022; color: #e5e7eb; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto; }
     #wrap { display: flex; flex-direction: column; height: 100%; }
     header { padding: 10px 14px; border-bottom: 1px solid #1f2937; background: #0f172a; }
-    main { flex: 1; }
+    main { flex: 1; display: grid; grid-template-columns: 240px 1fr; }
+    #sidebar { border-right: 1px solid #1f2937; padding: 10px; }
+    #watch { display: flex; flex-direction: column; gap: 6px; }
+    .watch-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border: 1px solid #374151; border-radius: 8px; cursor: pointer; }
+    .watch-item .rm { margin-left: 10px; color: #fca5a5; cursor: pointer; }
     #chart { width: 100%; height: calc(100vh - 54px); }
     #msg { padding: 6px 12px; color: #fca5a5; font-size: 13px; }
     #topbar { display:flex; gap:10px; align-items:center; }
     #search { width: 320px; padding: 8px 10px; border-radius: 8px; border: 1px solid #374151; background: #0a0f20; color: #e5e7eb; }
     #go { padding: 8px 12px; border-radius: 8px; border: 1px solid #374151; background: #2563eb; color: white; cursor: pointer; }
+    #add { padding: 8px 12px; border-radius: 8px; border: 1px solid #374151; background: #10b981; color: white; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -32,11 +37,16 @@
           <button class="tf" data-tf="1h">1h</button>
           <button class="tf" data-tf="day">1d</button>
           <button class="tf" data-tf="month">1mo</button>
+          <button id="add">+ Add</button>
         </div>
       </div>
     </header>
     <div id="msg"></div>
     <main>
+      <aside id="sidebar">
+        <div class="small" style="color:#94a3b8;margin-bottom:6px;">Watchlist</div>
+        <div id="watch"></div>
+      </aside>
       <div id="chart"></div>
     </main>
   </div>
@@ -47,15 +57,17 @@
     const search = document.getElementById('search');
     const dl = document.getElementById('symbols');
     const goBtn = document.getElementById('go');
+    const addBtn = document.getElementById('add');
+    const watchEl = document.getElementById('watch');
 
-    const state = { symbol: 'AAPL', timespan: '15m', window: 'max', chart: null, series: null };
+    const state = { symbol: 'AAPL', timespan: '15m', window: 'max', chart: null, seriesPre: null, seriesReg: null, seriesPost: null, watch: JSON.parse(localStorage.getItem('simple.watch') || '[]') };
 
     function showError(text) {
       msg.textContent = text || '';
     }
 
     async function ensureChart() {
-      if (state.chart && state.series) return;
+      if (state.chart && state.seriesPre && state.seriesReg && state.seriesPost) return;
       if (!window.LightweightCharts || typeof window.LightweightCharts.createChart !== 'function') {
         throw new Error('Chart library failed to load.');
       }
@@ -68,10 +80,14 @@
       if (!state.chart || typeof state.chart.addCandlestickSeries !== 'function') {
         throw new Error('Chart API not ready.');
       }
-      state.series = state.chart.addCandlestickSeries({
-        upColor: '#0ec07f', downColor: '#ff4d4f',
-        borderDownColor: '#ff4d4f', borderUpColor: '#0ec07f',
-        wickDownColor: '#ff4d4f', wickUpColor: '#0ec07f'
+      state.seriesPre = state.chart.addCandlestickSeries({
+        upColor: '#60a5fa', downColor: '#60a5fa', borderUpColor: '#60a5fa', borderDownColor: '#60a5fa', wickUpColor: '#60a5fa', wickDownColor: '#60a5fa'
+      });
+      state.seriesReg = state.chart.addCandlestickSeries({
+        upColor: '#0ec07f', downColor: '#ff4d4f', borderDownColor: '#ff4d4f', borderUpColor: '#0ec07f', wickDownColor: '#ff4d4f', wickUpColor: '#0ec07f'
+      });
+      state.seriesPost = state.chart.addCandlestickSeries({
+        upColor: '#a78bfa', downColor: '#a78bfa', borderUpColor: '#a78bfa', borderDownColor: '#a78bfa', wickUpColor: '#a78bfa', wickDownColor: '#a78bfa'
       });
     }
 
@@ -83,7 +99,21 @@
         throw new Error('Failed to get candles: ' + txt);
       }
       const data = await resp.json();
-      return (data.candles || []).map(c => ({ time: Math.floor(c.t / 1000), open: c.o, high: c.h, low: c.l, close: c.c }));
+      return (data.candles || []).map(c => ({ time: Math.floor(c.t / 1000), open: c.o, high: c.h, low: c.l, close: c.c, t: c.t }));
+    }
+
+    function nyMinutes(ms) {
+      const opt = { hour: '2-digit', minute: '2-digit', timeZone: 'America/New_York', hour12: false };
+      const [hh, mm] = new Intl.DateTimeFormat('en-US', opt).format(new Date(ms)).split(':').map(Number);
+      return hh * 60 + mm;
+    }
+
+    function sessionOf(ms) {
+      const m = nyMinutes(ms);
+      if (m >= 570 && m <= 960) return 'reg'; // 09:30 - 16:00
+      if (m >= 240 && m < 570) return 'pre';  // 04:00 - 09:29
+      if (m > 960 && m <= 1200) return 'post'; // 16:01 - 20:00
+      return 'post';
     }
 
     async function loadSymbol(symbol) {
@@ -92,9 +122,18 @@
         await ensureChart();
         const candles = await fetchCandles(symbol);
         if (!candles.length) throw new Error('No candles returned.');
-        state.series.setData(candles);
+        const pre = [], reg = [], post = [];
+        for (const c of candles) {
+          const item = { time: c.time, open: c.open, high: c.high, low: c.low, close: c.close };
+          const sess = sessionOf(c.t);
+          if (sess === 'reg') reg.push(item); else if (sess === 'pre') pre.push(item); else post.push(item);
+        }
+        state.seriesPre.setData(pre);
+        state.seriesReg.setData(reg);
+        state.seriesPost.setData(post);
         state.symbol = symbol.toUpperCase();
         title.textContent = `${state.symbol} • ${state.timespan}`;
+        renderWatch();
       } catch (e) {
         showError(String(e && e.message ? e.message : e));
       }
@@ -132,6 +171,31 @@
       const sym = search.value.trim(); if (sym) loadSymbol(sym);
     });
 
+    function saveWatch() { localStorage.setItem('simple.watch', JSON.stringify(state.watch)); }
+    function renderWatch() {
+      watchEl.innerHTML = '';
+      state.watch.forEach(sym => {
+        const row = document.createElement('div');
+        row.className = 'watch-item';
+        const name = document.createElement('span');
+        name.textContent = sym;
+        const rm = document.createElement('span');
+        rm.className = 'rm';
+        rm.textContent = '×';
+        rm.onclick = (ev) => { ev.stopPropagation(); state.watch = state.watch.filter(s => s !== sym); saveWatch(); renderWatch(); };
+        row.onclick = () => loadSymbol(sym);
+        row.appendChild(name);
+        row.appendChild(rm);
+        watchEl.appendChild(row);
+      });
+    }
+
+    addBtn.addEventListener('click', () => {
+      const sym = (search.value || '').trim().toUpperCase();
+      if (!sym) return;
+      if (!state.watch.includes(sym)) { state.watch.push(sym); saveWatch(); renderWatch(); }
+    });
+
     document.querySelectorAll('.tf').forEach(btn => {
       btn.addEventListener('click', async () => {
         state.timespan = btn.getAttribute('data-tf');
@@ -139,7 +203,7 @@
       });
     });
 
-    window.addEventListener('DOMContentLoaded', () => loadSymbol('AAPL'));
+    window.addEventListener('DOMContentLoaded', () => { renderWatch(); loadSymbol('AAPL'); });
   </script>
 </body>
 </html>
