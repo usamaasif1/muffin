@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from services.github_reader import read_github_file
+from backend.services.github_reader import read_github_file
 
 
 class ReadGithubRequest(BaseModel):

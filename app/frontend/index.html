@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GitHub File Reader</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji'; margin: 0; padding: 0; }
+    header { padding: 16px; background: #0f172a; color: white; }
+    main { padding: 20px; max-width: 960px; margin: 0 auto; }
+    .card { background: #0b1022; color: #e5e7eb; border: 1px solid #1f2937; border-radius: 10px; padding: 16px; box-shadow: 0 6px 24px rgba(0,0,0,0.25); }
+    label { display: block; font-weight: 600; margin-top: 12px; }
+    input, textarea { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #374151; background: #0a0f20; color: #e5e7eb; }
+    input::placeholder { color: #94a3b8; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    button { margin-top: 14px; padding: 10px 16px; border: 0; border-radius: 8px; background: #2563eb; color: white; font-weight: 600; cursor: pointer; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    pre { white-space: pre-wrap; word-break: break-word; background: #0a0f20; border: 1px solid #374151; padding: 12px; border-radius: 8px; overflow: auto; max-height: 60vh; }
+    .meta { color: #93c5fd; font-size: 0.9rem; margin-top: 8px; }
+    .error { color: #fecaca; font-weight: 600; }
+    a { color: #93c5fd; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>GitHub File Reader</h1>
+  </header>
+  <main>
+    <div class="card">
+      <p>Enter a GitHub file URL (blob or raw). For private repos, provide a GitHub token.</p>
+      <div class="row">
+        <div>
+          <label for="url">File URL</label>
+          <input id="url" type="url" placeholder="e.g. https://github.com/owner/repo/blob/main/README.md" />
+        </div>
+        <div>
+          <label for="token">GitHub Token (optional)</label>
+          <input id="token" type="password" placeholder="ghp_..." />
+        </div>
+      </div>
+      <button id="fetch">Fetch File</button>
+      <div id="status" class="meta"></div>
+      <div id="error" class="error"></div>
+      <div id="result" style="display:none;">
+        <div class="meta">File: <span id="fileName"></span> • Size: <span id="size"></span> • Source: <span id="source"></span></div>
+        <pre id="content"></pre>
+      </div>
+      <p class="meta">Tip: If you only have a repo URL like <code>https://github.com/usamaasif1/muffin</code>, add <code>/blob/main/README.md</code> (or <code>master</code>).</p>
+    </div>
+  </main>
+  <script>
+    const el = (id) => document.getElementById(id);
+    const btn = el('fetch');
+
+    btn.addEventListener('click', async () => {
+      const url = el('url').value.trim();
+      const token = el('token').value.trim();
+      el('error').textContent = '';
+      el('status').textContent = '';
+      el('result').style.display = 'none';
+      if (!url) { el('error').textContent = 'Please provide a GitHub file URL.'; return; }
+      btn.disabled = true; btn.textContent = 'Fetching...';
+      try {
+        const resp = await fetch('/api/read-github-file', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, token: token || null })
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data?.detail || 'Request failed');
+        el('fileName').textContent = data.file_name;
+        el('size').textContent = new Intl.NumberFormat().format(data.size_bytes) + ' bytes';
+        el('source').textContent = data.source;
+        el('content').textContent = data.content;
+        el('result').style.display = 'block';
+        el('status').textContent = 'Success';
+      } catch (err) {
+        el('error').textContent = String(err.message || err);
+      } finally {
+        btn.disabled = false; btn.textContent = 'Fetch File';
+      }
+    });
+  </script>
+</body>
+</html>

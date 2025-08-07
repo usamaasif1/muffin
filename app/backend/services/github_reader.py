@@ -20,6 +20,20 @@ def _is_github_blob_url(url: str) -> bool:
     return url.startswith("https://github.com/") and "/blob/" in url
 
 
+def _is_github_repo_root(url: str) -> bool:
+    if not url.startswith("https://github.com/"):
+        return False
+    remainder = url[len("https://github.com/") :].strip("/")
+    parts = remainder.split("/")
+    return len(parts) == 2  # owner/repo
+
+
+def _split_repo_root(url: str) -> Tuple[str, str]:
+    remainder = url[len("https://github.com/") :].strip("/")
+    owner, repo = remainder.split("/")
+    return owner, repo
+
+
 def _convert_blob_to_raw(url: str) -> Optional[str]:
     # https://github.com/{owner}/{repo}/blob/{ref}/{path} ->
     # https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{path}
@@ -120,14 +134,48 @@ def _parse_github_url_to_components(url: str) -> Tuple[str, str, str, str]:
     raise ValueError("Unsupported GitHub URL. Provide a standard blob or raw URL.")
 
 
-def read_github_file(url: str, token: Optional[str] = None) -> GithubFileResult:
-    """Read a GitHub file from a standard URL.
+def _get_default_branch(owner: str, repo: str, token: Optional[str], timeout_sec: int = 15) -> Optional[str]:
+    api = f"https://api.github.com/repos/{owner}/{repo}"
+    headers = {"Accept": "application/vnd.github.v3+json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        resp = requests.get(api, headers=headers, timeout=timeout_sec)
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("default_branch")
+    except Exception:
+        return None
 
-    If token is provided, uses GitHub API which works for private repos.
-    Otherwise, uses the raw URL path which only works for public files.
+
+def read_github_file(url: str, token: Optional[str] = None) -> GithubFileResult:
+    """Read a GitHub file from a standard URL or repo root.
+
+    - If token is provided, uses GitHub API (works for private repos).
+    - If a repo root URL is provided, attempts to read README.md from default/main/master.
+    - Otherwise, uses the raw URL path (public files) or API with token.
     """
     if not url:
         raise ValueError("url is required")
+
+    # Handle repository root by targeting README.md
+    if _is_github_repo_root(url):
+        owner, repo = _split_repo_root(url)
+        if token:
+            default_branch = _get_default_branch(owner, repo, token) or "main"
+            guess_blob = f"https://github.com/{owner}/{repo}/blob/{default_branch}/README.md"
+            return fetch_via_github_api(url=guess_blob, token=token)
+        else:
+            # Try public raw main then master
+            for branch in ("main", "master"):
+                raw = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/README.md"
+                try:
+                    return fetch_public_raw(raw)
+                except Exception:
+                    continue
+            raise ValueError(
+                "Could not locate README.md at main or master. Provide a direct file URL or a token for private repos."
+            )
 
     if token:
         return fetch_via_github_api(url=url, token=token)
