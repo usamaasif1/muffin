@@ -108,13 +108,13 @@ def _fetch_candles_polygon(symbol: str, timespan: Timespan, window: str, key: st
     # Map 'max' to conservative ranges to avoid provider 429s
     if window == "max":
         if timespan == "1m":
-            delta = dt.timedelta(days=30)  # ~30 days of 1-minute bars
+            delta = dt.timedelta(days=7)   # ~7 days of 1-minute bars
         elif timespan == "5m":
-            delta = dt.timedelta(days=90)   # ~3 months of 5-minute bars
+            delta = dt.timedelta(days=30)  # ~30 days of 5-minute bars
         elif timespan == "15m":
-            delta = dt.timedelta(days=180)  # ~6 months of 15-minute bars
+            delta = dt.timedelta(days=60)  # ~60 days of 15-minute bars
         elif timespan == "1h":
-            delta = dt.timedelta(days=730)  # ~2 years of hourly bars
+            delta = dt.timedelta(days=365) # ~1 year of hourly bars
         elif timespan == "day":
             delta = dt.timedelta(days=365 * 20)  # ~20 years for daily
         else:  # month
@@ -138,7 +138,7 @@ def _fetch_candles_polygon(symbol: str, timespan: Timespan, window: str, key: st
         return base + "?" + urlencode(params)
 
     # Try with backoff on 429 by shrinking the window
-    attempts_remaining = 3
+    attempts_remaining = 5
     current_delta = delta
 
     while attempts_remaining > 0:
@@ -152,7 +152,7 @@ def _fetch_candles_polygon(symbol: str, timespan: Timespan, window: str, key: st
             # shrink window by half and try again
             shrink_days = max(1, int(current_delta.days * 0.5))
             current_delta = dt.timedelta(days=shrink_days)
-            time.sleep(0.5)
+            time.sleep(1.0)
             continue
         resp.raise_for_status()
         data = resp.json()
@@ -171,7 +171,7 @@ def _fetch_candles_polygon(symbol: str, timespan: Timespan, window: str, key: st
         next_url = data.get("next_url") or data.get("nextUrl")
         while next_url:
             # Respectful small delay to reduce chance of 429
-            time.sleep(0.2)
+            time.sleep(0.5)
             separator = "&" if "?" in next_url else "?"
             page_url = f"{next_url}{separator}apiKey={key}"
             page_resp = requests.get(page_url, timeout=30)
@@ -180,7 +180,7 @@ def _fetch_candles_polygon(symbol: str, timespan: Timespan, window: str, key: st
                 attempts_remaining -= 1
                 shrink_days = max(1, int(current_delta.days * 0.5))
                 current_delta = dt.timedelta(days=shrink_days)
-                time.sleep(0.5)
+                time.sleep(1.0)
                 break
             page_resp.raise_for_status()
             page_data = page_resp.json()
