@@ -100,10 +100,10 @@
 
     function windowForTimespan(ts) {
       switch (ts) {
-        case '1m': return '30d';
-        case '5m': return '90d';
-        case '15m': return '180d';
-        case '1h': return '730d';
+        case '1m': return '2d';
+        case '5m': return '7d';
+        case '15m': return '30d';
+        case '1h': return '180d';
         case 'day': return 'max';
         case 'month': return 'max';
         default: return '180d';
