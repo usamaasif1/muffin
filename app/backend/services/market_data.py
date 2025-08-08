@@ -96,11 +96,9 @@ def fetch_candles(
 ) -> List[Candle]:
     key = _get_polygon_key(polygon_key)
     if key:
-        try:
-            return _fetch_candles_polygon(symbol, timespan, window, key)
-        except Exception as exc:
-            # fall back to yahoo if polygon fails
-            pass
+        # With a key, do NOT fall back to Yahoo. Bubble up Polygon errors.
+        return _fetch_candles_polygon(symbol, timespan, window, key)
+    # No key available: best-effort Yahoo fallback
     return _fetch_candles_yahoo(symbol, timespan, window)
 
 
