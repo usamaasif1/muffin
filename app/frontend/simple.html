@@ -102,7 +102,7 @@
       });
     }
 
-    const state = { symbol: 'AAPL', timespan: '15m', window: 'max', chart: null, series: null, watch: JSON.parse(localStorage.getItem('simple.watch') || '[]'), levelLines: [], strategies: [] };
+    const state = { symbol: 'AAPL', timespan: '15m', window: 'max', chart: null, series: null, watch: JSON.parse(localStorage.getItem('simple.watch') || '[]'), levelLines: [], strategies: [], lastCandles: [], strategyTimer: null, strategyState: { postMarket: { active: false, branchAClosedAbove: false, branchBClosedAbove: false, branchCAllAbove: false, refOpen: null, lastCloseTime: null } } };
 
     function showError(text) {
       msg.textContent = text || '';
@@ -130,6 +130,17 @@
     async function fetchCandles(symbol) {
       const win = windowForTimespan(state.timespan);
       const url = `/api/candles?symbol=${encodeURIComponent(symbol)}&timespan=${state.timespan}&window=${win}`;
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        const txt = await resp.text().catch(()=> '');
+        throw new Error('Failed to get candles: ' + txt);
+      }
+      const data = await resp.json();
+      return (data.candles || []).map(c => ({ time: Math.floor(c.t / 1000), open: c.o, high: c.h, low: c.l, close: c.c, t: c.t }));
+    }
+
+    async function fetchCandlesCustom(symbol, ts, win) {
+      const url = `/api/candles?symbol=${encodeURIComponent(symbol)}&timespan=${ts}&window=${win}`;
       const resp = await fetch(url);
       if (!resp.ok) {
         const txt = await resp.text().catch(()=> '');
@@ -188,6 +199,125 @@
       return { lml, lmh, ppml, ppmh };
     }
 
+    // Post-market detection (America/New_York time)
+    function nyDateParts(ms) {
+      const d = new Date(ms);
+      const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+      const parts = fmt.formatToParts(d);
+      const get = (t)=> parts.find(p=>p.type===t)?.value;
+      const yyyy = parseInt(get('year')); const MM = parseInt(get('month')); const dd = parseInt(get('day')); const hh = parseInt(get('hour')); const mm = parseInt(get('minute'));
+      return { yyyy, MM, dd, hh, mm };
+    }
+
+    function isPostMarket(ms) {
+      const { hh, mm } = nyDateParts(ms);
+      const mins = hh * 60 + mm; // NY minutes
+      return mins > 960 && mins <= 1200; // 16:01 - 20:00
+    }
+
+    function groupByDateNY(candles) {
+      const map = new Map();
+      candles.forEach(c => {
+        const { yyyy, MM, dd } = nyDateParts(c.t);
+        const key = `${yyyy}-${String(MM).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
+        if (!map.has(key)) map.set(key, []);
+        map.get(key).push(c);
+      });
+      return map;
+    }
+
+    function evaluatePostMarketStrategy(monthLevels) {
+      const strat = state.strategyState.postMarket;
+      // Require monthly levels to proceed
+      if (!monthLevels) return updateStrategyStatus(false);
+      const { lml, lmh, ppml, ppmh } = monthLevels;
+      // Fetch 1h candles from last 7 days for evaluation
+      fetchCandlesCustom(state.symbol, '1h', '14d')
+        .then(candles1h => {
+          // Consider only post-market candles of the latest day with any post-market data
+          const byDate = groupByDateNY(candles1h.filter(c => isPostMarket(c.t)));
+          const dates = Array.from(byDate.keys()).sort();
+          if (!dates.length) { updateStrategyStatus(false); return; }
+          const latest = dates[dates.length - 1];
+          const pmBars = byDate.get(latest).sort((a,b)=>a.t-b.t);
+          if (!pmBars.length) { updateStrategyStatus(false); return; }
+
+          // Determine post-market open (first bar open)
+          const pmOpen = pmBars[0].open;
+          strat.refOpen = pmOpen;
+
+          // Last confirmed close within post-market (exclude a bar that is still forming by comparing time to now ~ we assume latest bar close <= now-1min acceptable)
+          const nowMs = Date.now();
+          const closedBars = pmBars.filter(b => (nowMs/1000 - b.time) > 60);
+          const lastClosed = closedBars.length ? closedBars[closedBars.length - 1] : pmBars[pmBars.length - 1];
+          strat.lastCloseTime = lastClosed.t;
+
+          const gainPct = ((lastClosed.close - pmOpen) / pmOpen) * 100;
+
+          // Trigger condition: gain >= 20% on a confirmed close
+          if (!strat.active && gainPct >= 20) strat.active = true;
+
+          // Stay active: as long as gain > 0% on confirmed close
+          if (strat.active && gainPct < 0) strat.active = false;
+
+          // Branch logic only within post-market bars, following close-then-touch rule
+          // Track closes above levels
+          // Branch A: close above L.M.L then later touch (wick) P.P.M.L => off
+          // Branch B: close above L.M.H then later touch (wick) P.P.M.H => off
+          // Branch C: close above all four levels in post-market => stays on regardless
+
+          // Identify first closes above for A/B and whether all four are closed above for C
+          let closedAboveLML = false, closedAboveLMH = false, closedAboveAll = false;
+          for (const b of pmBars) {
+            if (lml != null && b.close >= lml) closedAboveLML = true;
+            if (lmh != null && b.close >= lmh) closedAboveLMH = true;
+            if (lml != null && lmh != null && ppml != null && ppmh != null && b.close >= lml && b.close >= lmh && b.close >= ppml && b.close >= ppmh) {
+              closedAboveAll = true;
+              break;
+            }
+          }
+          strat.branchAClosedAbove = closedAboveLML;
+          strat.branchBClosedAbove = closedAboveLMH;
+          strat.branchCAllAbove = closedAboveAll;
+
+          if (closedAboveAll) {
+            // Branch C override
+            strat.active = true;
+          } else {
+            // After the first close-above, check for touch of the paired previous-previous month level
+            if (closedAboveLML && ppml != null) {
+              const laterBars = pmBars.filter(b => b.t > strat.lastCloseTime);
+              const touched = laterBars.some(b => b.low <= ppml || b.high >= ppml);
+              if (touched) strat.active = false;
+            }
+            if (closedAboveLMH && ppmh != null) {
+              const laterBars = pmBars.filter(b => b.t > strat.lastCloseTime);
+              const touched = laterBars.some(b => b.high >= ppmh || b.low <= ppmh);
+              if (touched) strat.active = false;
+            }
+          }
+
+          updateStrategyStatus(strat.active);
+        })
+        .catch(() => updateStrategyStatus(false));
+    }
+
+    function updateStrategyStatus(isActive) {
+      // Update in state.strategies and re-render
+      state.strategies = state.strategies.map(s => s.id === 'post-market' ? { ...s, active: !!isActive } : s);
+      renderStrategies();
+    }
+
+    function startStrategyLoop() {
+      if (state.strategyTimer) clearInterval(state.strategyTimer);
+      const levels = computeMonthlyLevels(state.lastCandles || []);
+      evaluatePostMarketStrategy(levels);
+      state.strategyTimer = setInterval(() => {
+        const lv = computeMonthlyLevels(state.lastCandles || []);
+        evaluatePostMarketStrategy(lv);
+      }, 60000); // every 60s
+    }
+
     async function loadSymbol(symbol) {
       showError('');
       try {
@@ -196,7 +326,8 @@
         if (!candles.length) throw new Error('No candles returned.');
         state.series.setData(candles.map(c => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })));
         clearLevelLines();
-        const lv = computeMonthlyLevels(candles);
+        state.lastCandles = candles;
+        const lv = computeMonthlyLevels(state.lastCandles);
         if (lv) {
           if (lv.lml != null) addLevel(lv.lml, '#94a3b8', 'L.M.L');
           if (lv.lmh != null) addLevel(lv.lmh, '#94a3b8', 'L.M.H');
@@ -206,6 +337,7 @@
         state.symbol = symbol.toUpperCase();
         title.textContent = `${state.symbol} • ${state.timespan}`;
         renderWatch();
+        startStrategyLoop();
       } catch (e) {
         showError(String(e && e.message ? e.message : e));
       }
