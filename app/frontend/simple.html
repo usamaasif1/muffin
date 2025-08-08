@@ -10,12 +10,21 @@
     html, body { height: 100%; margin: 0; background: #0b1022; color: #e5e7eb; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto; }
     #wrap { display: flex; flex-direction: column; height: 100%; }
     header { padding: 10px 14px; border-bottom: 1px solid #1f2937; background: #0f172a; }
-    main { flex: 1; display: grid; grid-template-columns: 240px 1fr; }
+    main { flex: 1; display: grid; grid-template-columns: 240px 1fr 280px; }
     #sidebar { border-right: 1px solid #1f2937; padding: 10px; }
     #watch { display: flex; flex-direction: column; gap: 6px; }
     .watch-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border: 1px solid #374151; border-radius: 8px; cursor: pointer; }
     .watch-item .rm { margin-left: 10px; color: #fca5a5; cursor: pointer; }
     #chart { width: 100%; height: calc(100vh - 54px); }
+    /* Right strategy panel */
+    #rightPanel { border-left: 1px solid #1f2937; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+    .panel-title { color: #94a3b8; font-size: 12px; margin-bottom: 6px; }
+    .strategy-card { border: 1px solid #374151; border-radius: 8px; padding: 10px; background: #0a0f20; display: grid; gap: 6px; }
+    .strategy-name { font-weight: 600; }
+    .status-row { display: flex; align-items: center; gap: 8px; }
+    .status-pill { padding: 2px 8px; border-radius: 999px; font-size: 12px; border: 1px solid #374151; }
+    .status-on { background: #0b3d2a; color: #10b981; border-color: #14532d; }
+    .status-off { background: #3a0d0d; color: #f87171; border-color: #7f1d1d; }
     #msg { padding: 6px 12px; color: #fca5a5; font-size: 13px; }
     #topbar { display:flex; gap:10px; align-items:center; }
     #search { width: 320px; padding: 8px 10px; border-radius: 8px; border: 1px solid #374151; background: #0a0f20; color: #e5e7eb; }
@@ -49,6 +58,10 @@
         <div id="watch"></div>
       </aside>
       <div id="chart"></div>
+      <aside id="rightPanel">
+        <div class="panel-title">Strategies</div>
+        <div id="strategyList"></div>
+      </aside>
     </main>
   </div>
 
@@ -60,8 +73,36 @@
     const goBtn = document.getElementById('go');
     const addBtn = document.getElementById('add');
     const watchEl = document.getElementById('watch');
+    const strategyListEl = document.getElementById('strategyList');
 
-    const state = { symbol: 'AAPL', timespan: '15m', window: 'max', chart: null, series: null, watch: JSON.parse(localStorage.getItem('simple.watch') || '[]'), levelLines: [] };
+    // Strategy model: { id: string, name: string, active: boolean }
+    function loadDefaultStrategies() {
+      state.strategies = [
+        { id: 'post-market', name: 'Post Market Strategy', active: false },
+      ];
+    }
+
+    function renderStrategies() {
+      strategyListEl.innerHTML = '';
+      state.strategies.forEach((s) => {
+        const card = document.createElement('div');
+        card.className = 'strategy-card';
+        const name = document.createElement('div');
+        name.className = 'strategy-name';
+        name.textContent = s.name;
+        const row = document.createElement('div');
+        row.className = 'status-row';
+        const pill = document.createElement('span');
+        pill.className = 'status-pill ' + (s.active ? 'status-on' : 'status-off');
+        pill.textContent = s.active ? 'In Operation' : 'Not in Operation';
+        row.appendChild(pill);
+        card.appendChild(name);
+        card.appendChild(row);
+        strategyListEl.appendChild(card);
+      });
+    }
+
+    const state = { symbol: 'AAPL', timespan: '15m', window: 'max', chart: null, series: null, watch: JSON.parse(localStorage.getItem('simple.watch') || '[]'), levelLines: [], strategies: [] };
 
     function showError(text) {
       msg.textContent = text || '';
@@ -234,7 +275,12 @@
       });
     });
 
-    window.addEventListener('DOMContentLoaded', () => { renderWatch(); loadSymbol('AAPL'); });
+    window.addEventListener('DOMContentLoaded', () => {
+      loadDefaultStrategies();
+      renderStrategies();
+      renderWatch();
+      loadSymbol('AAPL');
+    });
   </script>
 </body>
 </html>
