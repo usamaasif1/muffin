@@ -15,6 +15,17 @@
     #watch { display: flex; flex-direction: column; gap: 6px; }
     .watch-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border: 1px solid #374151; border-radius: 8px; cursor: pointer; }
     .watch-item .rm { margin-left: 10px; color: #fca5a5; cursor: pointer; }
+    .mode-row { display:flex; align-items:center; gap:8px; margin-bottom: 10px; }
+    .mode-btn { padding: 6px 10px; border-radius: 8px; border: 1px solid #374151; background: #0a0f20; color: #e5e7eb; cursor: pointer; }
+    .mode-btn.active { background: #2563eb; color: white; }
+    /* Backtest UI */
+    #btPanel { display: none; }
+    #btInputs { display: grid; gap: 8px; margin-top: 8px; }
+    #btSymbols { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid #374151; background: #0a0f20; color: #e5e7eb; }
+    #runBt { padding: 8px 12px; border-radius: 8px; border: 1px solid #374151; background: #10b981; color: white; cursor: pointer; }
+    #btResults { display: grid; gap: 6px; margin-top: 10px; }
+    .bt-item { border: 1px solid #374151; border-radius: 8px; padding: 8px; background: #0a0f20; display:flex; align-items:center; justify-content: space-between; }
+    .bt-error { color: #fca5a5; font-size: 12px; }
     #chart { width: 100%; height: calc(100vh - 54px); }
     /* Right strategy panel */
     #rightPanel { border-left: 1px solid #1f2937; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
@@ -54,8 +65,23 @@
     <div id="msg"></div>
     <main>
       <aside id="sidebar">
-        <div class="small" style="color:#94a3b8;margin-bottom:6px;">Watchlist</div>
-        <div id="watch"></div>
+        <div class="mode-row">
+          <button id="liveMode" class="mode-btn active">Live</button>
+          <button id="btMode" class="mode-btn">Backtest</button>
+        </div>
+        <div id="livePanel">
+          <div class="small" style="color:#94a3b8;margin-bottom:6px;">Watchlist</div>
+          <div id="watch"></div>
+        </div>
+        <div id="btPanel">
+          <div class="small" style="color:#94a3b8;margin-bottom:6px;">Backtest (Last 7 Days)</div>
+          <div id="btInputs">
+            <input id="btSymbols" placeholder="Symbols (comma-separated): AAPL,TSLA,MSFT" />
+            <div class="small" style="color:#94a3b8;">Range: Last 7 Days</div>
+            <button id="runBt">Run Backtest</button>
+          </div>
+          <div id="btResults"></div>
+        </div>
       </aside>
       <div id="chart"></div>
       <aside id="rightPanel">
@@ -73,6 +99,13 @@
     const goBtn = document.getElementById('go');
     const addBtn = document.getElementById('add');
     const watchEl = document.getElementById('watch');
+    const liveModeBtn = document.getElementById('liveMode');
+    const btModeBtn = document.getElementById('btMode');
+    const livePanel = document.getElementById('livePanel');
+    const btPanel = document.getElementById('btPanel');
+    const btSymbols = document.getElementById('btSymbols');
+    const runBt = document.getElementById('runBt');
+    const btResults = document.getElementById('btResults');
     const strategyListEl = document.getElementById('strategyList');
 
     // Strategy model: { id: string, name: string, active: boolean }
@@ -102,7 +135,7 @@
       });
     }
 
-    const state = { symbol: 'AAPL', timespan: '15m', window: 'max', chart: null, series: null, watch: JSON.parse(localStorage.getItem('simple.watch') || '[]'), levelLines: [], strategies: [], lastCandles: [], strategyTimer: null, strategyState: { postMarket: { active: false, branchAClosedAbove: false, branchBClosedAbove: false, branchCAllAbove: false, refOpen: null, lastCloseTime: null } } };
+    const state = { symbol: 'AAPL', timespan: '15m', window: 'max', chart: null, series: null, watch: JSON.parse(localStorage.getItem('simple.watch') || '[]'), levelLines: [], strategies: [], lastCandles: [], strategyTimer: null, strategyState: { postMarket: { active: false, branchAClosedAbove: false, branchBClosedAbove: false, branchCAllAbove: false, refOpen: null, lastCloseTime: null } }, mode: 'live', btCache: {} };
 
     function showError(text) {
       msg.textContent = text || '';
@@ -407,10 +440,68 @@
       });
     });
 
+    // Mode toggle
+    function setMode(m) {
+      state.mode = m;
+      liveModeBtn.classList.toggle('active', m === 'live');
+      btModeBtn.classList.toggle('active', m === 'bt');
+      livePanel.style.display = m === 'live' ? '' : 'none';
+      btPanel.style.display = m === 'bt' ? '' : 'block';
+    }
+    liveModeBtn.onclick = () => setMode('live');
+    btModeBtn.onclick = () => setMode('bt');
+
+    // Backtest: fetch last 7d for each symbol (1m and 1h)
+    async function runBacktest() {
+      btResults.innerHTML = '';
+      const raw = (btSymbols.value || '').trim();
+      if (!raw) return;
+      const syms = raw.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+      for (const sym of syms) {
+        const row = document.createElement('div'); row.className = 'bt-item';
+        const left = document.createElement('div'); left.textContent = sym;
+        const right = document.createElement('div');
+        const btn = document.createElement('button'); btn.textContent = 'Show on Chart'; btn.className = 'mode-btn'; btn.disabled = true;
+        right.appendChild(btn);
+        row.appendChild(left); row.appendChild(right);
+        btResults.appendChild(row);
+        try {
+          const resp = await fetch(`/api/backtest?symbol=${encodeURIComponent(sym)}`);
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data?.detail || 'Backtest failed');
+          state.btCache[sym] = { m1: data.candles_1m, h1: data.candles_1h };
+          btn.disabled = false;
+          btn.onclick = () => showBacktestOnChart(sym);
+        } catch (e) {
+          const err = document.createElement('div'); err.className = 'bt-error'; err.textContent = String(e.message || e);
+          row.appendChild(err);
+        }
+      }
+    }
+    runBt.onclick = runBacktest;
+
+    function showBacktestOnChart(sym) {
+      const cache = state.btCache[sym]; if (!cache) return;
+      // Use 1m data for detailed chart
+      const candles = (cache.m1 || []).map(c => ({ time: Math.floor(c.t/1000), open: c.o, high: c.h, low: c.l, close: c.c, t: c.t }));
+      if (!candles.length) return;
+      state.series.setData(candles.map(c => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })));
+      state.symbol = sym;
+      title.textContent = `${state.symbol} • backtest (1m)`;
+      // Shade post-market hours visually by drawing horizontal lines at candle highs/lows within PM window (simple visual hint)
+      clearLevelLines();
+      candles.filter(c => isPostMarket(c.t)).slice(0, 50).forEach(c => {
+        // draw faint lines to hint shading; real shading would need overlays not supported in this minimal setup
+        const pl = state.series.createPriceLine({ price: c.high, color: '#334155', lineWidth: 1, lineStyle: 1, axisLabelVisible: false, title: '' });
+        state.levelLines.push(pl);
+      });
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
       loadDefaultStrategies();
       renderStrategies();
       renderWatch();
+      setMode('live');
       loadSymbol('AAPL');
     });
   </script>

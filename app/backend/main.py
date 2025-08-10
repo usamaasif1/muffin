@@ -119,6 +119,24 @@ async def api_big_movers(payload: BigMoversRequest) -> dict:
     return {"movers": movers}
 
 
+@app.get("/api/backtest")
+async def api_backtest(
+    symbol: str = Query(..., min_length=1),
+    x_api_key: Optional[str] = Header(default=None),
+) -> dict:
+    try:
+        candles_1m = fetch_candles(symbol=symbol, timespan="1m", window="7d", polygon_key=x_api_key)
+        candles_1h = fetch_candles(symbol=symbol, timespan="1h", window="7d", polygon_key=x_api_key)
+        return {
+            "symbol": symbol.upper(),
+            "range": "last_7_days",
+            "candles_1m": [c.__dict__ for c in candles_1m],
+            "candles_1h": [c.__dict__ for c in candles_1h],
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 frontend_dir = os.path.join(os.path.dirname(__file__), "..", "frontend")
 frontend_dir = os.path.abspath(frontend_dir)
 
