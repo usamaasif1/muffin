@@ -205,7 +205,7 @@
       });
     }
 
-    const state = { activeSymbol: 'AAPL', symbol: 'AAPL', timespan: '15m', window: 'max', chart: null, series: null, watch: JSON.parse(localStorage.getItem('simple.watch') || '[]'), levelLines: [], strategies: [], lastCandles: [], lastCandlesLive: [], strategyTimer: null, strategyState: { postMarket: { active: false, branchAClosedAbove: false, branchBClosedAbove: false, branchCAllAbove: false, refOpen: null, lastCloseTime: null } }, mode: 'live', btCache: {}, btPlayback: { sym: null, tf: '1m', candles: [], idx: 0, startIdx: 0, timer: null, playing: false, intervalMs: 1000, startLine: null }, levelsSource: 'live', liveLevelCache: {}, levelsReqSeq: 0, currentLevelsReq: 0 };
+    const state = { activeSymbol: 'AAPL', symbol: 'AAPL', timespan: '15m', window: 'max', chart: null, series: null, watch: JSON.parse(localStorage.getItem('simple.watch') || '[]'), levelLines: [], strategies: [], lastCandles: [], lastCandlesLive: [], strategyTimer: null, strategyState: { postMarket: { active: false, branchAClosedAbove: false, branchBClosedAbove: false, branchCAllAbove: false, refOpen: null, lastCloseTime: null } }, mode: 'live', btCache: {}, btPlayback: { sym: null, tf: '1m', candles: [], idx: 0, startIdx: 0, timer: null, playing: false, intervalMs: 1000, startLine: null }, levelsSource: 'live', liveLevelCache: {}, levelsReqSeq: 0, currentLevelsReq: 0, btReqSeq: 0, currentBtReq: 0 };
     const DEV_ENABLE_LEVEL_TOGGLE = false;
 
     function showError(text) {
@@ -435,6 +435,10 @@
       renderPlaybackControls();
       // Increment levels request id to invalidate stale updates
       state.levelsReqSeq += 1;
+      state.btReqSeq += 1;
+      if (state.mode === 'bt') {
+        fetchBacktestForSymbol(state.activeSymbol);
+      }
     }
 
     async function loadSymbol(symbol) {
@@ -543,6 +547,9 @@
       devLevelsToggle.style.display = (m === 'bt' && DEV_ENABLE_LEVEL_TOGGLE) ? 'block' : 'none';
       // When entering Backtest, ensure levels reflect levelsSource
       if (m === 'bt') {
+        state.levelsSource = 'historical';
+        // kick historical fetch for current symbol
+        fetchBacktestForSymbol(state.activeSymbol);
         computeAndRenderBtLevels();
       } else {
         // Live: recompute levels from daily historical
@@ -567,12 +574,7 @@
         row.appendChild(left); row.appendChild(right);
         btResults.appendChild(row);
         try {
-          const resp = await fetch(`/api/backtest?symbol=${encodeURIComponent(sym)}`);
-          const data = await resp.json();
-          if (!resp.ok) throw new Error(data?.detail || 'Backtest failed');
-          const rangeKey = `last7d_ref=${data?.levels?.reference_date || 'unknown'}`;
-          if (!state.btCache[sym]) state.btCache[sym] = {};
-          state.btCache[sym][rangeKey] = { m1: data.candles_1m, h1: data.candles_1h, d1_90: data.candles_1d_90, levels: data.levels };
+          const rangeKey = await fetchBacktestForSymbol(sym);
           btn.disabled = false;
           btn.onclick = () => showBacktestOnChart(sym, rangeKey);
         } catch (e) {
@@ -581,12 +583,37 @@
         }
       }
     }
-    runBt.onclick = runBacktest;
+
+    async function fetchBacktestForSymbol(sym) {
+      const reqId = ++state.btReqSeq; state.currentBtReq = reqId;
+      // Loading state
+      if (state.mode === 'bt' && state.activeSymbol === sym) renderBtLevels(null);
+      const resp = await fetch(`/api/backtest?symbol=${encodeURIComponent(sym)}`);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.detail || 'Backtest failed');
+      const rangeKey = `last7d_ref=${data?.levels?.reference_date || 'unknown'}`;
+      if (!state.btCache[sym]) state.btCache[sym] = {};
+      state.btCache[sym][rangeKey] = { m1: data.candles_1m, h1: data.candles_1h, d1_90: data.candles_1d_90, levels: data.levels };
+      // Only apply if latest and symbol matches
+      if (state.currentBtReq !== reqId || state.activeSymbol !== sym) {
+        console.warn('Ignoring stale backtest response for', sym);
+        return rangeKey;
+      }
+      if (state.mode === 'bt' && state.activeSymbol === sym) {
+        renderBtLevels(data.levels);
+        drawLevelLines(data.levels);
+      }
+      return rangeKey;
+    }
 
     function showBacktestOnChart(sym, rangeKey) {
       setActiveSymbol(sym);
       const cacheRoot = state.btCache[sym]; if (!cacheRoot) return;
-      const cache = cacheRoot[rangeKey] || Object.values(cacheRoot)[0];
+      let cache = cacheRoot[rangeKey];
+      if (!cache) {
+        const rk = await fetchBacktestForSymbol(sym);
+        cache = state.btCache[sym][rk];
+      }
       // Use 1m data for detailed chart
       const useTf = (btTf.value || '1m');
       const raw = useTf === '1h' ? (cache.h1 || []) : (cache.m1 || []);
@@ -599,11 +626,11 @@
       state.symbol = state.activeSymbol;
       title.textContent = `${state.activeSymbol} • backtest (${useTf})`;
       // Draw levels from historical (backend-provided)
-      if (cache.levels) {
+      if (cache?.levels) {
         renderBtLevels(cache.levels);
         drawLevelLines(cache.levels);
       } else {
-        computeAndRenderBtLevels(candles);
+        renderBtLevels(null);
       }
       state.btPlayback = { sym: state.activeSymbol, tf: useTf, candles, idx: 0, startIdx: 0, timer: null, playing: false, intervalMs: state.btPlayback.intervalMs || 1000, startLine: null };
       enableStartPointPicker();
@@ -697,6 +724,13 @@
 
     function renderBtLevels(lv) {
       const fmt = (v) => (v != null ? Number(v).toFixed(2) : '—');
+      if (!lv) {
+        lvl_lml.textContent = '—';
+        lvl_lmh.textContent = '—';
+        lvl_ppml.textContent = '—';
+        lvl_ppmh.textContent = '—';
+        return;
+      }
       lvl_lml.textContent = fmt(lv.lml);
       lvl_lmh.textContent = fmt(lv.lmh);
       lvl_ppml.textContent = fmt(lv.ppml);
