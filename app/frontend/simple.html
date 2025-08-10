@@ -118,6 +118,13 @@
         <div class="panel-title">Strategies</div>
         <div id="strategyList"></div>
         <div class="panel-title" style="margin-top:8px;">Levels</div>
+        <div id="liveLevelsBox" style="display:none; border: 1px solid #374151; border-radius: 8px; padding: 10px; background: #0a0f20;">
+          <div class="small" style="color:#94a3b8; margin-bottom:6px;">Source: live</div>
+          <div class="level-row"><div class="level-left"><span class="swatch swatch-grey"></span><span>L.M.L</span></div><div id="live_lvl_lml">—</div></div>
+          <div class="level-row"><div class="level-left"><span class="swatch swatch-grey"></span><span>L.M.H</span></div><div id="live_lvl_lmh">—</div></div>
+          <div class="level-row"><div class="level-left"><span class="swatch swatch-blue"></span><span>P.P.M.L</span></div><div id="live_lvl_ppml">—</div></div>
+          <div class="level-row"><div class="level-left"><span class="swatch swatch-blue"></span><span>P.P.M.H</span></div><div id="live_lvl_ppmh">—</div></div>
+        </div>
         <div id="btLevelsBox">
           <div class="small" id="levelBadge" style="color:#94a3b8; margin-bottom:6px;">Source: historical</div>
           <div class="level-row"><div class="level-left"><span class="swatch swatch-grey"></span><span>L.M.L</span></div><div id="lvl_lml">—</div></div>
@@ -158,6 +165,7 @@
     const btTf = document.getElementById('btTf');
     const strategyListEl = document.getElementById('strategyList');
     const btLevelsBox = document.getElementById('btLevelsBox');
+    const liveLevelsBox = document.getElementById('liveLevelsBox');
     const lvl_lml = document.getElementById('lvl_lml');
     const lvl_lmh = document.getElementById('lvl_lmh');
     const lvl_ppml = document.getElementById('lvl_ppml');
@@ -165,6 +173,10 @@
     const levelBadge = document.getElementById('levelBadge');
     const devLevelsToggle = document.getElementById('devLevelsToggle');
     const levelsSourceSel = document.getElementById('levelsSourceSel');
+    const live_lvl_lml = document.getElementById('live_lvl_lml');
+    const live_lvl_lmh = document.getElementById('live_lvl_lmh');
+    const live_lvl_ppml = document.getElementById('live_lvl_ppml');
+    const live_lvl_ppmh = document.getElementById('live_lvl_ppmh');
 
     // Strategy model: { id: string, name: string, active: boolean }
     function loadDefaultStrategies() {
@@ -193,7 +205,7 @@
       });
     }
 
-    const state = { symbol: 'AAPL', timespan: '15m', window: 'max', chart: null, series: null, watch: JSON.parse(localStorage.getItem('simple.watch') || '[]'), levelLines: [], strategies: [], lastCandles: [], lastCandlesLive: [], strategyTimer: null, strategyState: { postMarket: { active: false, branchAClosedAbove: false, branchBClosedAbove: false, branchCAllAbove: false, refOpen: null, lastCloseTime: null } }, mode: 'live', btCache: {}, btPlayback: { sym: null, tf: '1m', candles: [], idx: 0, startIdx: 0, timer: null, playing: false, intervalMs: 1000, startLine: null }, levelsSource: 'live' };
+    const state = { symbol: 'AAPL', timespan: '15m', window: 'max', chart: null, series: null, watch: JSON.parse(localStorage.getItem('simple.watch') || '[]'), levelLines: [], strategies: [], lastCandles: [], lastCandlesLive: [], strategyTimer: null, strategyState: { postMarket: { active: false, branchAClosedAbove: false, branchBClosedAbove: false, branchCAllAbove: false, refOpen: null, lastCloseTime: null } }, mode: 'live', btCache: {}, btPlayback: { sym: null, tf: '1m', candles: [], idx: 0, startIdx: 0, timer: null, playing: false, intervalMs: 1000, startLine: null }, levelsSource: 'live', liveLevelCache: {} };
     const DEV_ENABLE_LEVEL_TOGGLE = false;
 
     function showError(text) {
@@ -419,13 +431,8 @@
         state.series.setData(candles.map(c => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })));
         clearLevelLines();
         state.lastCandles = candles;
-        const lv = computeMonthlyLevels(state.lastCandles);
-        if (lv) {
-          if (lv.lml != null) addLevel(lv.lml, '#94a3b8', 'L.M.L');
-          if (lv.lmh != null) addLevel(lv.lmh, '#94a3b8', 'L.M.H');
-          if (lv.ppml != null) addLevel(lv.ppml, '#38bdf8', 'P.P.M.L');
-          if (lv.ppmh != null) addLevel(lv.ppmh, '#38bdf8', 'P.P.M.H');
-        }
+        // Live levels drawn from daily history, not intraday TF
+        await computeAndRenderLiveLevels();
         state.symbol = symbol.toUpperCase();
         title.textContent = `${state.symbol} • ${state.timespan}`;
         renderWatch();
@@ -508,6 +515,7 @@
       btPanel.style.display = m === 'bt' ? '' : 'block';
       // Levels panel only in Backtest mode
       btLevelsBox.style.display = m === 'bt' ? 'block' : 'none';
+      liveLevelsBox.style.display = m === 'live' ? 'block' : 'none';
       // Strict UI separation: header controls
       const showLiveHeader = m === 'live';
       search.style.display = showLiveHeader ? '' : 'none';
@@ -519,6 +527,9 @@
       // When entering Backtest, ensure levels reflect levelsSource
       if (m === 'bt') {
         computeAndRenderBtLevels();
+      } else {
+        // Live: recompute levels from daily historical
+        computeAndRenderLiveLevels();
       }
     }
     liveModeBtn.onclick = () => setMode('live');
@@ -674,10 +685,11 @@
     function drawLevelLines(lv) {
       clearLevelLines();
       if (lv) {
-        if (lv.lml != null) addLevel(lv.lml, '#94a3b8', 'L.M.L');
-        if (lv.lmh != null) addLevel(lv.lmh, '#94a3b8', 'L.M.H');
-        if (lv.ppml != null) addLevel(lv.ppml, '#38bdf8', 'P.P.M.L');
-        if (lv.ppmh != null) addLevel(lv.ppmh, '#38bdf8', 'P.P.M.H');
+        // L.M.* dotted (1), P.P.M.* dashed (2)
+        if (lv.lml != null) state.levelLines.push(state.series.createPriceLine({ price: lv.lml, color: '#94a3b8', lineWidth: 1, lineStyle: 1, axisLabelVisible: true, title: 'L.M.L' }));
+        if (lv.lmh != null) state.levelLines.push(state.series.createPriceLine({ price: lv.lmh, color: '#94a3b8', lineWidth: 1, lineStyle: 1, axisLabelVisible: true, title: 'L.M.H' }));
+        if (lv.ppml != null) state.levelLines.push(state.series.createPriceLine({ price: lv.ppml, color: '#38bdf8', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'P.P.M.L' }));
+        if (lv.ppmh != null) state.levelLines.push(state.series.createPriceLine({ price: lv.ppmh, color: '#38bdf8', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'P.P.M.H' }));
       }
     }
 
@@ -686,6 +698,69 @@
       const cache = state.btCache[state.symbol];
       const lv = cache?.levels || null;
       if (lv) { renderBtLevels(lv); drawLevelLines(lv); }
+    }
+
+    // Live: fetch 90d daily and compute NY-based levels; cache per symbol
+    async function computeAndRenderLiveLevels() {
+      const sym = state.symbol;
+      const cached = state.liveLevelCache[sym];
+      if (cached) {
+        renderLiveLevelsPanel(cached);
+        drawLevelLines(cached);
+        return;
+      }
+      try {
+        // Fetch daily 90d independent of TF
+        const resp = await fetch(`/api/candles?symbol=${encodeURIComponent(sym)}&timespan=day&window=90d`);
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data?.detail || 'Daily fetch failed');
+        const daily = (data.candles || []).map(c => ({ t: c.t, h: c.h, l: c.l }));
+        const lv = computeMonthlyLevelsNY(daily);
+        state.liveLevelCache[sym] = lv;
+        renderLiveLevelsPanel(lv);
+        drawLevelLines(lv);
+      } catch (e) {
+        // leave panel as-is
+      }
+    }
+
+    function computeMonthlyLevelsNY(daily) {
+      if (!daily || !daily.length) return null;
+      // Map t-> NY date
+      const nyFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' });
+      const toNYDate = (ms) => {
+        const parts = nyFmt.formatToParts(new Date(ms));
+        const y = parseInt(parts.find(p=>p.type==='year').value);
+        const m = parseInt(parts.find(p=>p.type==='month').value);
+        const d = parseInt(parts.find(p=>p.type==='day').value);
+        return new Date(Date.UTC(y, m-1, d));
+      };
+      // Reference: latest NY date in daily
+      const sorted = daily.slice().sort((a,b)=>a.t-b.t);
+      const lastDate = toNYDate(sorted[sorted.length-1].t);
+      const lmEnd = new Date(lastDate.getTime() - 24*3600*1000);
+      const lmStart = new Date(lmEnd.getTime() - 31*24*3600*1000);
+      const inRange = (d, a, b) => d>=a && d<=b;
+      const lmWins = sorted.filter(b => inRange(toNYDate(b.t), lmStart, lmEnd));
+      const lml = lmWins.length ? Math.min(...lmWins.map(b=>b.l)) : null;
+      const lmh = lmWins.length ? Math.max(...lmWins.map(b=>b.h)) : null;
+      // previous calendar month
+      const y = lastDate.getUTCFullYear(); const m = lastDate.getUTCMonth();
+      let pmY = y, pmM = m - 1; if (pmM < 0) { pmM = 11; pmY -= 1; }
+      const ppmStart = new Date(Date.UTC(pmY, pmM, 1));
+      const ppmEnd = new Date(Date.UTC(pmY, pmM+1, 0));
+      const ppmWins = sorted.filter(b => inRange(toNYDate(b.t), ppmStart, ppmEnd));
+      const ppml = ppmWins.length ? Math.min(...ppmWins.map(b=>b.l)) : null;
+      const ppmh = ppmWins.length ? Math.max(...ppmWins.map(b=>b.h)) : null;
+      return { lml, lmh, ppml, ppmh };
+    }
+
+    function renderLiveLevelsPanel(lv) {
+      const fmt = (v) => (v != null ? Number(v).toFixed(2) : 'N/A');
+      live_lvl_lml.textContent = fmt(lv?.lml);
+      live_lvl_lmh.textContent = fmt(lv?.lmh);
+      live_lvl_ppml.textContent = fmt(lv?.ppml);
+      live_lvl_ppmh.textContent = fmt(lv?.ppmh);
     }
 
     if (DEV_ENABLE_LEVEL_TOGGLE && levelsSourceSel) {
