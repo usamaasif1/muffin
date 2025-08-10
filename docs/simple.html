@@ -1,3 +1,10 @@
+<!-- docs/simple.html -->
+<script>
+  /* Optional default: you can override at runtime with ?api=<base> */
+  window.__CONFIG__ = window.__CONFIG__ || {
+    API_BASE_URL: "https://muffin-64tv.onrender.com/api"
+  };
+</script>
 <!doctype html>
 <html lang="en">
 <head>
@@ -15,18 +22,13 @@
     .watch-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border: 1px solid #374151; border-radius: 8px; cursor: pointer; }
     .watch-item .rm { margin-left: 10px; color: #fca5a5; cursor: pointer; }
     #chart { width: 100%; height: calc(100vh - 54px); }
-    #msg { padding: 6px 12px; color: #fca5a5; font-size: 13px; }
+    #msg { padding: 6px 12px; color: #fca5a5; font-size: 13px; white-space: pre-wrap; }
     #topbar { display:flex; gap:10px; align-items:center; }
     #search { width: 320px; padding: 8px 10px; border-radius: 8px; border: 1px solid #374151; background: #0a0f20; color: #e5e7eb; }
     #go { padding: 8px 12px; border-radius: 8px; border: 1px solid #374151; background: #2563eb; color: white; cursor: pointer; }
     #add { padding: 8px 12px; border-radius: 8px; border: 1px solid #374151; background: #10b981; color: white; cursor: pointer; }
-    #api-ind { font-size: 12px; color: #94a3b8; padding: 2px 6px; border: 1px solid #1f2937; border-radius: 6px; }
+    #apiBadge { margin-left: 10px; font-size: 12px; color: #94a3b8; }
   </style>
-
-  <!-- Optional: inline config; leave as-is or remove. Kept for compatibility. -->
-  <script>
-    // window.__CONFIG__ = { API_BASE_URL: "https://muffin-64tv.onrender.com/api" };
-  </script>
 </head>
 <body>
   <div id="wrap">
@@ -36,8 +38,7 @@
         <input id="search" list="symbols" placeholder="Search ticker (AAPL, TSLA, apple)" />
         <datalist id="symbols"></datalist>
         <button id="go">Go</button>
-        <div style="margin-left:auto; display:flex; gap:6px; align-items:center;">
-          <span id="api-ind"></span>
+        <div style="margin-left:auto; display:flex; gap:6px;">
           <button class="tf" data-tf="1m">1m</button>
           <button class="tf" data-tf="5m">5m</button>
           <button class="tf" data-tf="15m">15m</button>
@@ -46,6 +47,7 @@
           <button class="tf" data-tf="month">1mo</button>
           <button id="add">+ Add</button>
         </div>
+        <span id="apiBadge"></span>
       </div>
     </header>
     <div id="msg"></div>
@@ -59,32 +61,20 @@
   </div>
 
   <script>
-    // ---------- API base resolver ----------
+    // ---------------- API base resolver ----------------
     const qsApi = new URLSearchParams(location.search).get('api');
     const cfgApi = (window.__CONFIG__ && window.__CONFIG__.API_BASE_URL) || '';
     const API_BASE_URL = (qsApi && qsApi.trim()) || (cfgApi && cfgApi.trim()) || '/api';
 
-    function apiUrl(path, query) {
-      const base = API_BASE_URL.replace(/\/+$/,'');
-      const p = String(path || '').replace(/^\/+/, '');
-      const q = query ? (query[0] === '?' ? query : '?' + query) : '';
-      return base + '/' + p + q;
+    function apiUrl(endpoint, params) {
+      const base = API_BASE_URL.replace(/\/+$/, '');
+      const path = String(endpoint || '').replace(/^\/+/, '');
+      let url = `${base}/${path}`;
+      if (params) url += (params[0] === '?' ? params : `?${params}`);
+      return url;
     }
-    // --- API base resolver ---
-const qsApi = new URLSearchParams(location.search).get('api');
-const cfgApi = (window.__CONFIG__ && window.__CONFIG__.API_BASE_URL) || '';
-const API_BASE_URL = (qsApi && qsApi.trim()) || (cfgApi && cfgApi.trim()) || '/api';
+    // ---------------------------------------------------
 
-function apiUrl(endpoint, params) {
-  const base = API_BASE_URL.replace(/\/+$/, '');
-  const path = String(endpoint || '').replace(/^\/+/, '');
-  let url = `${base}/${path}`;
-  if (params) url += (params[0] === '?' ? params : `?${params}`);
-  return url;
-}
-
-
-    // ---------- DOM refs ----------
     const msg = document.getElementById('msg');
     const title = document.getElementById('title');
     const search = document.getElementById('search');
@@ -92,20 +82,13 @@ function apiUrl(endpoint, params) {
     const goBtn = document.getElementById('go');
     const addBtn = document.getElementById('add');
     const watchEl = document.getElementById('watch');
-    const apiInd = document.getElementById('api-ind');
+    const apiBadge = document.getElementById('apiBadge');
 
-    const state = {
-      symbol: 'AAPL',
-      timespan: '15m',
-      window: 'max',
-      chart: null,
-      seriesPre: null,
-      seriesReg: null,
-      seriesPost: null,
-      watch: JSON.parse(localStorage.getItem('simple.watch') || '[]')
-    };
+    const state = { symbol: 'AAPL', timespan: '15m', window: 'max', chart: null, seriesPre: null, seriesReg: null, seriesPost: null, watch: JSON.parse(localStorage.getItem('simple.watch') || '[]') };
 
-    function showError(text) { msg.textContent = text || ''; }
+    function showError(text) {
+      msg.textContent = text || '';
+    }
 
     async function ensureChart() {
       if (state.chart && state.seriesPre && state.seriesReg && state.seriesPost) return;
@@ -136,14 +119,11 @@ function apiUrl(endpoint, params) {
       const url = apiUrl('candles', `symbol=${encodeURIComponent(symbol)}&timespan=${state.timespan}&window=${state.window}`);
       const resp = await fetch(url);
       if (!resp.ok) {
-        const txt = await resp.text().catch(() => '');
+        const txt = await resp.text().catch(()=> '');
         throw new Error('Failed to get candles: ' + txt);
       }
       const data = await resp.json();
-      return (data.candles || []).map(c => ({
-        time: Math.floor(c.t / 1000),
-        open: c.o, high: c.h, low: c.l, close: c.c, t: c.t
-      }));
+      return (data.candles || []).map(c => ({ time: Math.floor(c.t / 1000), open: c.o, high: c.h, low: c.l, close: c.c, t: c.t }));
     }
 
     function nyMinutes(ms) {
@@ -154,9 +134,9 @@ function apiUrl(endpoint, params) {
 
     function sessionOf(ms) {
       const m = nyMinutes(ms);
-      if (m >= 570 && m <= 960) return 'reg';    // 09:30 - 16:00
-      if (m >= 240 && m < 570)  return 'pre';    // 04:00 - 09:29
-      if (m > 960 && m <= 1200) return 'post';   // 16:01 - 20:00
+      if (m >= 570 && m <= 960) return 'reg'; // 09:30 - 16:00
+      if (m >= 240 && m < 570) return 'pre';  // 04:00 - 09:29
+      if (m > 960 && m <= 1200) return 'post'; // 16:01 - 20:00
       return 'post';
     }
 
@@ -170,9 +150,7 @@ function apiUrl(endpoint, params) {
         for (const c of candles) {
           const item = { time: c.time, open: c.open, high: c.high, low: c.low, close: c.close };
           const sess = sessionOf(c.t);
-          if (sess === 'reg') reg.push(item);
-          else if (sess === 'pre') pre.push(item);
-          else post.push(item);
+          if (sess === 'reg') reg.push(item); else if (sess === 'pre') pre.push(item); else post.push(item);
         }
         state.seriesPre.setData(pre);
         state.seriesReg.setData(reg);
@@ -188,39 +166,13 @@ function apiUrl(endpoint, params) {
     async function searchSymbols(q) {
       if (!q || q.length < 1) return [];
       try {
-        const url = apiUrl('search', `q=${encodeURIComponent(q)}`);
-        const resp = await fetch(url);
+        const resp = await fetch(apiUrl('search', `q=${encodeURIComponent(q)}`));
         if (!resp.ok) return [];
         const data = await resp.json();
         return data.items || [];
-      } catch {
-        return [];
-      }
+      } catch { return []; }
     }
 
-    function saveWatch() { localStorage.setItem('simple.watch', JSON.stringify(state.watch)); }
-    function renderWatch() {
-      watchEl.innerHTML = '';
-      state.watch.forEach(sym => {
-        const row = document.createElement('div');
-        row.className = 'watch-item';
-        const name = document.createElement('span');
-        name.textContent = sym;
-        const rm = document.createElement('span');
-        rm.className = 'rm';
-        rm.textContent = '×';
-        rm.onclick = (ev) => {
-          ev.stopPropagation();
-          state.watch = state.watch.filter(s => s !== sym);
-          saveWatch(); renderWatch();
-        };
-        row.onclick = () => loadSymbol(sym);
-        row.appendChild(name); row.appendChild(rm);
-        watchEl.appendChild(row);
-      });
-    }
-
-    // UI wiring
     search.addEventListener('input', async () => {
       const q = search.value.trim();
       const items = await searchSymbols(q);
@@ -234,12 +186,33 @@ function apiUrl(endpoint, params) {
     });
 
     search.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { const sym = search.value.trim(); if (sym) loadSymbol(sym); }
+      if (e.key === 'Enter') {
+        const sym = search.value.trim(); if (sym) loadSymbol(sym);
+      }
     });
 
     goBtn.addEventListener('click', () => {
       const sym = search.value.trim(); if (sym) loadSymbol(sym);
     });
+
+    function saveWatch() { localStorage.setItem('simple.watch', JSON.stringify(state.watch)); }
+    function renderWatch() {
+      watchEl.innerHTML = '';
+      state.watch.forEach(sym => {
+        const row = document.createElement('div');
+        row.className = 'watch-item';
+        const name = document.createElement('span');
+        name.textContent = sym;
+        const rm = document.createElement('span');
+        rm.className = 'rm';
+        rm.textContent = '×';
+        rm.onclick = (ev) => { ev.stopPropagation(); state.watch = state.watch.filter(s => s !== sym); saveWatch(); renderWatch(); };
+        row.onclick = () => loadSymbol(sym);
+        row.appendChild(name);
+        row.appendChild(rm);
+        watchEl.appendChild(row);
+      });
+    }
 
     addBtn.addEventListener('click', () => {
       const sym = (search.value || '').trim().toUpperCase();
@@ -255,7 +228,7 @@ function apiUrl(endpoint, params) {
     });
 
     window.addEventListener('DOMContentLoaded', () => {
-      apiInd.textContent = `API: ${API_BASE_URL}`;
+      apiBadge.textContent = `API: ${API_BASE_URL}`;
       renderWatch();
       loadSymbol('AAPL');
     });
