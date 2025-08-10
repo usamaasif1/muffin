@@ -9,6 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from dotenv import load_dotenv
+from zoneinfo import ZoneInfo
+import datetime as dt
 
 from backend.services.github_reader import read_github_file
 from backend.services.market_data import (
@@ -127,11 +129,56 @@ async def api_backtest(
     try:
         candles_1m = fetch_candles(symbol=symbol, timespan="1m", window="7d", polygon_key=x_api_key)
         candles_1h = fetch_candles(symbol=symbol, timespan="1h", window="7d", polygon_key=x_api_key)
+        candles_1d_90 = fetch_candles(symbol=symbol, timespan="day", window="90d", polygon_key=x_api_key)
+
+        # Reference date: first day in the selected backtest range (NY date of (now - 7d))
+        now_utc = dt.datetime.utcnow().replace(tzinfo=dt.timezone.utc)
+        ny = ZoneInfo("America/New_York")
+        ref_local_date = (now_utc - dt.timedelta(days=7)).astimezone(ny).date()
+
+        # Compute historical levels from daily bars
+        def to_ny_date(ms: int) -> dt.date:
+            return dt.datetime.fromtimestamp(ms / 1000, tz=dt.timezone.utc).astimezone(ny).date()
+
+        day_bars = candles_1d_90
+        # Rolling last month: trailing 31 days ending day before ref
+        lm_end = ref_local_date - dt.timedelta(days=1)
+        lm_start = lm_end - dt.timedelta(days=31)
+        lm_window = [b for b in day_bars if lm_start <= to_ny_date(b.t) <= lm_end]
+        lml = min((b.l for b in lm_window), default=None)
+        lmh = max((b.h for b in lm_window), default=None)
+
+        # Previous calendar month
+        prev_month_year = ref_local_date.year
+        prev_month = ref_local_date.month - 1
+        if prev_month == 0:
+            prev_month = 12
+            prev_month_year -= 1
+        ppm_start = dt.date(prev_month_year, prev_month, 1)
+        # last day of previous month
+        if prev_month == 12:
+            ppm_end = dt.date(prev_month_year, 12, 31)
+        else:
+            ppm_end = dt.date(prev_month_year, prev_month + 1, 1) - dt.timedelta(days=1)
+        ppm_window = [b for b in day_bars if ppm_start <= to_ny_date(b.t) <= ppm_end]
+        ppml = min((b.l for b in ppm_window), default=None)
+        ppmh = max((b.h for b in ppm_window), default=None)
+
+        levels = {
+            "lml": lml,
+            "lmh": lmh,
+            "ppml": ppml,
+            "ppmh": ppmh,
+            "reference_date": ref_local_date.isoformat(),
+            "source": "historical",
+        }
         return {
             "symbol": symbol.upper(),
             "range": "last_7_days",
             "candles_1m": [c.__dict__ for c in candles_1m],
             "candles_1h": [c.__dict__ for c in candles_1h],
+            "candles_1d_90": [c.__dict__ for c in candles_1d_90],
+            "levels": levels,
         }
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
