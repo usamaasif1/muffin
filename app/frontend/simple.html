@@ -119,10 +119,18 @@
         <div id="strategyList"></div>
         <div class="panel-title" style="margin-top:8px;">Levels</div>
         <div id="btLevelsBox">
+          <div class="small" id="levelBadge" style="color:#94a3b8; margin-bottom:6px;">From Live Data</div>
           <div class="level-row"><div class="level-left"><span class="swatch swatch-grey"></span><span>L.M.L</span></div><div id="lvl_lml">—</div></div>
           <div class="level-row"><div class="level-left"><span class="swatch swatch-grey"></span><span>L.M.H</span></div><div id="lvl_lmh">—</div></div>
           <div class="level-row"><div class="level-left"><span class="swatch swatch-blue"></span><span>P.P.M.L</span></div><div id="lvl_ppml">—</div></div>
           <div class="level-row"><div class="level-left"><span class="swatch swatch-blue"></span><span>P.P.M.H</span></div><div id="lvl_ppmh">—</div></div>
+          <div id="devLevelsToggle" class="small" style="color:#94a3b8; margin-top:8px; display:none;">
+            Source: 
+            <select id="levelsSourceSel" class="mode-btn" style="padding:4px 8px;">
+              <option value="live" selected>live</option>
+              <option value="historical">historical</option>
+            </select>
+          </div>
         </div>
       </aside>
     </main>
@@ -154,6 +162,9 @@
     const lvl_lmh = document.getElementById('lvl_lmh');
     const lvl_ppml = document.getElementById('lvl_ppml');
     const lvl_ppmh = document.getElementById('lvl_ppmh');
+    const levelBadge = document.getElementById('levelBadge');
+    const devLevelsToggle = document.getElementById('devLevelsToggle');
+    const levelsSourceSel = document.getElementById('levelsSourceSel');
 
     // Strategy model: { id: string, name: string, active: boolean }
     function loadDefaultStrategies() {
@@ -182,7 +193,8 @@
       });
     }
 
-    const state = { symbol: 'AAPL', timespan: '15m', window: 'max', chart: null, series: null, watch: JSON.parse(localStorage.getItem('simple.watch') || '[]'), levelLines: [], strategies: [], lastCandles: [], strategyTimer: null, strategyState: { postMarket: { active: false, branchAClosedAbove: false, branchBClosedAbove: false, branchCAllAbove: false, refOpen: null, lastCloseTime: null } }, mode: 'live', btCache: {}, btPlayback: { sym: null, tf: '1m', candles: [], idx: 0, startIdx: 0, timer: null, playing: false, intervalMs: 1000 } };
+    const state = { symbol: 'AAPL', timespan: '15m', window: 'max', chart: null, series: null, watch: JSON.parse(localStorage.getItem('simple.watch') || '[]'), levelLines: [], strategies: [], lastCandles: [], lastCandlesLive: [], strategyTimer: null, strategyState: { postMarket: { active: false, branchAClosedAbove: false, branchBClosedAbove: false, branchCAllAbove: false, refOpen: null, lastCloseTime: null } }, mode: 'live', btCache: {}, btPlayback: { sym: null, tf: '1m', candles: [], idx: 0, startIdx: 0, timer: null, playing: false, intervalMs: 1000, startLine: null }, levelsSource: 'live' };
+    const DEV_ENABLE_LEVEL_TOGGLE = true;
 
     function showError(text) {
       msg.textContent = text || '';
@@ -496,6 +508,18 @@
       btPanel.style.display = m === 'bt' ? '' : 'block';
       // Levels panel only in Backtest mode
       btLevelsBox.style.display = m === 'bt' ? 'block' : 'none';
+      // Strict UI separation: header controls
+      const showLiveHeader = m === 'live';
+      search.style.display = showLiveHeader ? '' : 'none';
+      goBtn.style.display = showLiveHeader ? '' : 'none';
+      addBtn.style.display = showLiveHeader ? '' : 'none';
+      document.querySelectorAll('.tf').forEach(el => el.style.display = showLiveHeader ? '' : 'none');
+      // Dev toggle visibility
+      devLevelsToggle.style.display = (m === 'bt' && DEV_ENABLE_LEVEL_TOGGLE) ? 'block' : 'none';
+      // When entering Backtest, ensure levels reflect levelsSource
+      if (m === 'bt') {
+        computeAndRenderBtLevels();
+      }
     }
     liveModeBtn.onclick = () => setMode('live');
     btModeBtn.onclick = () => setMode('bt');
@@ -542,15 +566,8 @@
       clearLevelLines();
       state.symbol = sym;
       title.textContent = `${state.symbol} • backtest (${useTf})`;
-      // Draw levels from this dataset and keep during playback
-      const lv = computeMonthlyLevels(candles);
-      if (lv) {
-        if (lv.lml != null) addLevel(lv.lml, '#94a3b8', 'L.M.L');
-        if (lv.lmh != null) addLevel(lv.lmh, '#94a3b8', 'L.M.H');
-        if (lv.ppml != null) addLevel(lv.ppml, '#38bdf8', 'P.P.M.L');
-        if (lv.ppmh != null) addLevel(lv.ppmh, '#38bdf8', 'P.P.M.H');
-        renderBtLevels(lv);
-      }
+      // Draw levels per current source
+      computeAndRenderBtLevels(candles);
       state.btPlayback = { sym, tf: useTf, candles, idx: 0, startIdx: 0, timer: null, playing: false, intervalMs: state.btPlayback.intervalMs || 1000, startLine: null };
       enableStartPointPicker();
       renderPlaybackControls();
@@ -649,6 +666,46 @@
       lvl_ppmh.textContent = fmt(lv.ppmh);
     }
 
+    function drawLevelLines(lv) {
+      clearLevelLines();
+      if (lv) {
+        if (lv.lml != null) addLevel(lv.lml, '#94a3b8', 'L.M.L');
+        if (lv.lmh != null) addLevel(lv.lmh, '#94a3b8', 'L.M.H');
+        if (lv.ppml != null) addLevel(lv.ppml, '#38bdf8', 'P.P.M.L');
+        if (lv.ppmh != null) addLevel(lv.ppmh, '#38bdf8', 'P.P.M.H');
+      }
+    }
+
+    async function computeAndRenderBtLevels(histCandlesOptional) {
+      // levelsSource: 'live' (default) or 'historical'
+      let lv = null;
+      levelBadge.textContent = state.levelsSource === 'historical' ? 'From Historical Data' : 'From Live Data';
+      if (state.levelsSource === 'historical') {
+        const hc = histCandlesOptional || (state.btPlayback?.candles || []);
+        if (hc.length) lv = computeMonthlyLevels(hc);
+      } else {
+        const lc = state.lastCandlesLive && state.lastCandlesLive.length ? state.lastCandlesLive : state.lastCandles;
+        if (lc && lc.length) lv = computeMonthlyLevels(lc);
+        else {
+          // Fetch minimal live candles to compute monthly levels if none cached
+          try {
+            const live = await fetchCandles(state.symbol); // uses current timespan; acceptable fallback
+            state.lastCandlesLive = live;
+            lv = computeMonthlyLevels(live);
+          } catch (_) { /* ignore */ }
+        }
+      }
+      if (lv) {
+        renderBtLevels(lv);
+        drawLevelLines(lv);
+      }
+    }
+
+    levelsSourceSel.onchange = () => {
+      state.levelsSource = levelsSourceSel.value;
+      computeAndRenderBtLevels();
+    };
+
     window.addEventListener('DOMContentLoaded', () => {
       loadDefaultStrategies();
       renderStrategies();
@@ -656,6 +713,8 @@
       setMode('live');
       loadSymbol('AAPL');
       renderPlaybackControls();
+      // Enable dev toggle if flag set
+      if (DEV_ENABLE_LEVEL_TOGGLE) devLevelsToggle.style.display = 'none';
     });
   </script>
 </body>
