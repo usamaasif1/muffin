@@ -36,6 +36,13 @@
     .status-pill { padding: 2px 8px; border-radius: 999px; font-size: 12px; border: 1px solid #374151; }
     .status-on { background: #0b3d2a; color: #10b981; border-color: #14532d; }
     .status-off { background: #3a0d0d; color: #f87171; border-color: #7f1d1d; }
+    /* Backtest Levels panel */
+    #btLevelsBox { display: none; border: 1px solid #374151; border-radius: 8px; padding: 10px; background: #0a0f20; }
+    .level-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; }
+    .level-left { display: flex; align-items: center; gap: 8px; }
+    .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+    .swatch-grey { background: #94a3b8; }
+    .swatch-blue { background: #38bdf8; }
     #msg { padding: 6px 12px; color: #fca5a5; font-size: 13px; }
     #topbar { display:flex; gap:10px; align-items:center; }
     #search { width: 320px; padding: 8px 10px; border-radius: 8px; border: 1px solid #374151; background: #0a0f20; color: #e5e7eb; }
@@ -110,6 +117,13 @@
       <aside id="rightPanel">
         <div class="panel-title">Strategies</div>
         <div id="strategyList"></div>
+        <div class="panel-title" style="margin-top:8px;">Levels</div>
+        <div id="btLevelsBox">
+          <div class="level-row"><div class="level-left"><span class="swatch swatch-grey"></span><span>L.M.L</span></div><div id="lvl_lml">—</div></div>
+          <div class="level-row"><div class="level-left"><span class="swatch swatch-grey"></span><span>L.M.H</span></div><div id="lvl_lmh">—</div></div>
+          <div class="level-row"><div class="level-left"><span class="swatch swatch-blue"></span><span>P.P.M.L</span></div><div id="lvl_ppml">—</div></div>
+          <div class="level-row"><div class="level-left"><span class="swatch swatch-blue"></span><span>P.P.M.H</span></div><div id="lvl_ppmh">—</div></div>
+        </div>
       </aside>
     </main>
   </div>
@@ -135,6 +149,11 @@
     const speedSel = document.getElementById('speedSel');
     const btTf = document.getElementById('btTf');
     const strategyListEl = document.getElementById('strategyList');
+    const btLevelsBox = document.getElementById('btLevelsBox');
+    const lvl_lml = document.getElementById('lvl_lml');
+    const lvl_lmh = document.getElementById('lvl_lmh');
+    const lvl_ppml = document.getElementById('lvl_ppml');
+    const lvl_ppmh = document.getElementById('lvl_ppmh');
 
     // Strategy model: { id: string, name: string, active: boolean }
     function loadDefaultStrategies() {
@@ -475,6 +494,8 @@
       btModeBtn.classList.toggle('active', m === 'bt');
       livePanel.style.display = m === 'live' ? '' : 'none';
       btPanel.style.display = m === 'bt' ? '' : 'block';
+      // Levels panel only in Backtest mode
+      btLevelsBox.style.display = m === 'bt' ? 'block' : 'none';
     }
     liveModeBtn.onclick = () => setMode('live');
     btModeBtn.onclick = () => setMode('bt');
@@ -528,8 +549,9 @@
         if (lv.lmh != null) addLevel(lv.lmh, '#94a3b8', 'L.M.H');
         if (lv.ppml != null) addLevel(lv.ppml, '#38bdf8', 'P.P.M.L');
         if (lv.ppmh != null) addLevel(lv.ppmh, '#38bdf8', 'P.P.M.H');
+        renderBtLevels(lv);
       }
-      state.btPlayback = { sym, tf: useTf, candles, idx: 0, startIdx: 0, timer: null, playing: false, intervalMs: state.btPlayback.intervalMs || 1000 };
+      state.btPlayback = { sym, tf: useTf, candles, idx: 0, startIdx: 0, timer: null, playing: false, intervalMs: state.btPlayback.intervalMs || 1000, startLine: null };
       enableStartPointPicker();
       renderPlaybackControls();
     }
@@ -575,18 +597,19 @@
       const p = state.btPlayback; if (!p) return;
       if (p.timer) { clearInterval(p.timer); p.timer = null; }
       p.playing = false; p.idx = p.startIdx;
-      // Reset to context up to startIdx
-      const baseSlice = p.candles.slice(0, p.startIdx + 1);
-      state.series.setData(baseSlice.map(c => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })));
+      // Restore full dataset visibility on Stop
+      const full = p.candles;
+      state.series.setData(full.map(c => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })));
       renderPlaybackControls();
     }
 
     playBtn.onclick = startPlayback;
     pauseBtn.onclick = pausePlayback;
     stopBtn.onclick = stopPlayback;
+    // Map factor to interval: 1x -> 1000ms, 2x -> 500ms
     speedSel.onchange = () => {
-      const mult = parseFloat(speedSel.value || '1');
-      state.btPlayback.intervalMs = Math.max(50, Math.floor(1000 * mult));
+      const factor = parseFloat(speedSel.value || '1');
+      state.btPlayback.intervalMs = Math.max(50, Math.floor(1000 / factor));
       if (state.btPlayback.playing) {
         // restart timer with new speed
         clearInterval(state.btPlayback.timer);
@@ -607,11 +630,23 @@
         if (idx > 0 && p.candles[idx].time > sec) idx = idx - 1;
         p.startIdx = Math.max(0, idx);
         p.idx = p.startIdx;
+        // highlight selected start candle with a price line at its close
+        if (p.startLine) { try { state.series.removePriceLine(p.startLine); } catch(e) {} }
+        const startC = p.candles[p.startIdx];
+        p.startLine = state.series.createPriceLine({ price: startC.close, color: '#f59e0b', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: 'START' });
         // keep context up to startIdx visible
         const baseSlice = p.candles.slice(0, p.startIdx + 1);
         state.series.setData(baseSlice.map(c => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })));
         renderPlaybackControls();
       });
+    }
+
+    function renderBtLevels(lv) {
+      const fmt = (v) => (v != null ? Number(v).toFixed(2) : '—');
+      lvl_lml.textContent = fmt(lv.lml);
+      lvl_lmh.textContent = fmt(lv.lmh);
+      lvl_ppml.textContent = fmt(lv.ppml);
+      lvl_ppmh.textContent = fmt(lv.ppmh);
     }
 
     window.addEventListener('DOMContentLoaded', () => {
