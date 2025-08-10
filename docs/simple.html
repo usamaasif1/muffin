@@ -1,6 +1,6 @@
 <!-- docs/simple.html -->
 <script>
-  /* Optional default: you can override at runtime with ?api=<base> */
+  /* Optional default. You can still override with ?api=<base> in the URL */
   window.__CONFIG__ = window.__CONFIG__ || {
     API_BASE_URL: "https://muffin-64tv.onrender.com/api"
   };
@@ -61,49 +61,57 @@
   </div>
 
   <script>
-    // ---------------- API base resolver ----------------
-    const qsApi = new URLSearchParams(location.search).get('api');
-    const cfgApi = (window.__CONFIG__ && window.__CONFIG__.API_BASE_URL) || '';
-    const API_BASE_URL = (qsApi && qsApi.trim()) || (cfgApi && cfgApi.trim()) || '/api';
+  (() => {
+    'use strict';
 
-    function apiUrl(endpoint, params) {
+    // -------- API base resolver (scoped, no globals) --------
+    const params = new URLSearchParams(location.search);
+    const apiOverride = params.get('api');
+    const cfgApi = (window.__CONFIG__ && window.__CONFIG__.API_BASE_URL) || '';
+    const API_BASE_URL = (apiOverride && apiOverride.trim()) || (cfgApi && cfgApi.trim()) || '/api';
+
+    const $ = (id) => document.getElementById(id);
+    const msg = $('msg');
+    const title = $('title');
+    const search = $('search');
+    const dl = $('symbols');
+    const goBtn = $('go');
+    const addBtn = $('add');
+    const watchEl = $('watch');
+    const apiBadge = $('apiBadge');
+
+    const state = {
+      symbol: 'AAPL',
+      timespan: '15m',
+      window: 'max',
+      chart: null,
+      seriesPre: null,
+      seriesReg: null,
+      seriesPost: null,
+      watch: JSON.parse(localStorage.getItem('simple.watch') || '[]'),
+    };
+
+    function apiUrl(endpoint, query) {
       const base = API_BASE_URL.replace(/\/+$/, '');
       const path = String(endpoint || '').replace(/^\/+/, '');
       let url = `${base}/${path}`;
-      if (params) url += (params[0] === '?' ? params : `?${params}`);
+      if (query) url += (query[0] === '?' ? query : `?${query}`);
       return url;
     }
-    // ---------------------------------------------------
 
-    const msg = document.getElementById('msg');
-    const title = document.getElementById('title');
-    const search = document.getElementById('search');
-    const dl = document.getElementById('symbols');
-    const goBtn = document.getElementById('go');
-    const addBtn = document.getElementById('add');
-    const watchEl = document.getElementById('watch');
-    const apiBadge = document.getElementById('apiBadge');
-
-    const state = { symbol: 'AAPL', timespan: '15m', window: 'max', chart: null, seriesPre: null, seriesReg: null, seriesPost: null, watch: JSON.parse(localStorage.getItem('simple.watch') || '[]') };
-
-    function showError(text) {
-      msg.textContent = text || '';
-    }
+    function showError(text) { msg.textContent = text || ''; }
 
     async function ensureChart() {
       if (state.chart && state.seriesPre && state.seriesReg && state.seriesPost) return;
       if (!window.LightweightCharts || typeof window.LightweightCharts.createChart !== 'function') {
         throw new Error('Chart library failed to load.');
       }
-      state.chart = window.LightweightCharts.createChart(document.getElementById('chart'), {
+      state.chart = window.LightweightCharts.createChart($('chart'), {
         layout: { background: { color: '#0b1022' }, textColor: '#e5e7eb' },
         rightPriceScale: { borderColor: '#1f2937' },
         timeScale: { borderColor: '#1f2937', timeVisible: true, secondsVisible: false },
         grid: { vertLines: { color: '#111827' }, horzLines: { color: '#111827' } }
       });
-      if (!state.chart || typeof state.chart.addCandlestickSeries !== 'function') {
-        throw new Error('Chart API not ready.');
-      }
       state.seriesPre = state.chart.addCandlestickSeries({
         upColor: '#60a5fa', downColor: '#60a5fa', borderUpColor: '#60a5fa', borderDownColor: '#60a5fa', wickUpColor: '#60a5fa', wickDownColor: '#60a5fa'
       });
@@ -119,11 +127,13 @@
       const url = apiUrl('candles', `symbol=${encodeURIComponent(symbol)}&timespan=${state.timespan}&window=${state.window}`);
       const resp = await fetch(url);
       if (!resp.ok) {
-        const txt = await resp.text().catch(()=> '');
+        const txt = await resp.text().catch(()=>'');
         throw new Error('Failed to get candles: ' + txt);
       }
       const data = await resp.json();
-      return (data.candles || []).map(c => ({ time: Math.floor(c.t / 1000), open: c.o, high: c.h, low: c.l, close: c.c, t: c.t }));
+      return (data.candles || []).map(c => ({
+        time: Math.floor(c.t / 1000), open: c.o, high: c.h, low: c.l, close: c.c, t: c.t
+      }));
     }
 
     function nyMinutes(ms) {
@@ -131,12 +141,11 @@
       const [hh, mm] = new Intl.DateTimeFormat('en-US', opt).format(new Date(ms)).split(':').map(Number);
       return hh * 60 + mm;
     }
-
     function sessionOf(ms) {
       const m = nyMinutes(ms);
-      if (m >= 570 && m <= 960) return 'reg'; // 09:30 - 16:00
-      if (m >= 240 && m < 570) return 'pre';  // 04:00 - 09:29
-      if (m > 960 && m <= 1200) return 'post'; // 16:01 - 20:00
+      if (m >= 570 && m <= 960) return 'reg';   // 09:30 - 16:00
+      if (m >= 240 && m < 570) return 'pre';    // 04:00 - 09:29
+      if (m > 960 && m <= 1200) return 'post';  // 16:01 - 20:00
       return 'post';
     }
 
@@ -150,7 +159,9 @@
         for (const c of candles) {
           const item = { time: c.time, open: c.open, high: c.high, low: c.low, close: c.close };
           const sess = sessionOf(c.t);
-          if (sess === 'reg') reg.push(item); else if (sess === 'pre') pre.push(item); else post.push(item);
+          if (sess === 'reg') reg.push(item);
+          else if (sess === 'pre') pre.push(item);
+          else post.push(item);
         }
         state.seriesPre.setData(pre);
         state.seriesReg.setData(reg);
@@ -173,28 +184,6 @@
       } catch { return []; }
     }
 
-    search.addEventListener('input', async () => {
-      const q = search.value.trim();
-      const items = await searchSymbols(q);
-      dl.innerHTML = '';
-      items.slice(0, 10).forEach(it => {
-        const opt = document.createElement('option');
-        opt.value = it.symbol;
-        opt.label = it.name || it.symbol;
-        dl.appendChild(opt);
-      });
-    });
-
-    search.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        const sym = search.value.trim(); if (sym) loadSymbol(sym);
-      }
-    });
-
-    goBtn.addEventListener('click', () => {
-      const sym = search.value.trim(); if (sym) loadSymbol(sym);
-    });
-
     function saveWatch() { localStorage.setItem('simple.watch', JSON.stringify(state.watch)); }
     function renderWatch() {
       watchEl.innerHTML = '';
@@ -214,12 +203,25 @@
       });
     }
 
+    // UI events
+    search.addEventListener('input', async () => {
+      const q = search.value.trim();
+      const items = await searchSymbols(q);
+      dl.innerHTML = '';
+      items.slice(0, 10).forEach(it => {
+        const opt = document.createElement('option');
+        opt.value = it.symbol;
+        opt.label = it.name || it.symbol;
+        dl.appendChild(opt);
+      });
+    });
+    search.addEventListener('keydown', (e) => { if (e.key === 'Enter') { const s = search.value.trim(); if (s) loadSymbol(s); } });
+    goBtn.addEventListener('click', () => { const s = search.value.trim(); if (s) loadSymbol(s); });
     addBtn.addEventListener('click', () => {
       const sym = (search.value || '').trim().toUpperCase();
       if (!sym) return;
       if (!state.watch.includes(sym)) { state.watch.push(sym); saveWatch(); renderWatch(); }
     });
-
     document.querySelectorAll('.tf').forEach(btn => {
       btn.addEventListener('click', async () => {
         state.timespan = btn.getAttribute('data-tf');
@@ -232,6 +234,7 @@
       renderWatch();
       loadSymbol('AAPL');
     });
+  })();
   </script>
 </body>
 </html>
