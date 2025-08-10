@@ -70,6 +70,19 @@
       const q = query ? (query[0] === '?' ? query : '?' + query) : '';
       return base + '/' + p + q;
     }
+    // --- API base resolver ---
+const qsApi = new URLSearchParams(location.search).get('api');
+const cfgApi = (window.__CONFIG__ && window.__CONFIG__.API_BASE_URL) || '';
+const API_BASE_URL = (qsApi && qsApi.trim()) || (cfgApi && cfgApi.trim()) || '/api';
+
+function apiUrl(endpoint, params) {
+  const base = API_BASE_URL.replace(/\/+$/, '');
+  const path = String(endpoint || '').replace(/^\/+/, '');
+  let url = `${base}/${path}`;
+  if (params) url += (params[0] === '?' ? params : `?${params}`);
+  return url;
+}
+
 
     // ---------- DOM refs ----------
     const msg = document.getElementById('msg');
