@@ -41,6 +41,11 @@
     #search { width: 320px; padding: 8px 10px; border-radius: 8px; border: 1px solid #374151; background: #0a0f20; color: #e5e7eb; }
     #go { padding: 8px 12px; border-radius: 8px; border: 1px solid #374151; background: #2563eb; color: white; cursor: pointer; }
     #add { padding: 8px 12px; border-radius: 8px; border: 1px solid #374151; background: #10b981; color: white; cursor: pointer; }
+    /* Backtest playback */
+    #btPlayback { margin-top: 10px; display: grid; grid-template-columns: auto auto auto auto; gap: 8px; align-items: center; }
+    #playBtn, #pauseBtn, #stopBtn { padding: 6px 10px; border-radius: 8px; border: 1px solid #374151; background: #0a0f20; color: #e5e7eb; cursor: pointer; }
+    #playBtn:disabled, #pauseBtn:disabled, #stopBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+    #speedSel { padding: 6px 10px; border-radius: 8px; border: 1px solid #374151; background: #0a0f20; color: #e5e7eb; }
   </style>
 </head>
 <body>
@@ -81,6 +86,17 @@
             <button id="runBt">Run Backtest</button>
           </div>
           <div id="btResults"></div>
+          <div id="btPlayback">
+            <button id="playBtn">Play</button>
+            <button id="pauseBtn" disabled>Pause</button>
+            <button id="stopBtn" disabled>Stop</button>
+            <select id="speedSel">
+              <option value="4">0.25x</option>
+              <option value="2">0.5x</option>
+              <option value="1" selected>1x</option>
+              <option value="0.5">2x</option>
+            </select>
+          </div>
         </div>
       </aside>
       <div id="chart"></div>
@@ -106,6 +122,10 @@
     const btSymbols = document.getElementById('btSymbols');
     const runBt = document.getElementById('runBt');
     const btResults = document.getElementById('btResults');
+    const playBtn = document.getElementById('playBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const speedSel = document.getElementById('speedSel');
     const strategyListEl = document.getElementById('strategyList');
 
     // Strategy model: { id: string, name: string, active: boolean }
@@ -135,7 +155,7 @@
       });
     }
 
-    const state = { symbol: 'AAPL', timespan: '15m', window: 'max', chart: null, series: null, watch: JSON.parse(localStorage.getItem('simple.watch') || '[]'), levelLines: [], strategies: [], lastCandles: [], strategyTimer: null, strategyState: { postMarket: { active: false, branchAClosedAbove: false, branchBClosedAbove: false, branchCAllAbove: false, refOpen: null, lastCloseTime: null } }, mode: 'live', btCache: {} };
+    const state = { symbol: 'AAPL', timespan: '15m', window: 'max', chart: null, series: null, watch: JSON.parse(localStorage.getItem('simple.watch') || '[]'), levelLines: [], strategies: [], lastCandles: [], strategyTimer: null, strategyState: { postMarket: { active: false, branchAClosedAbove: false, branchBClosedAbove: false, branchCAllAbove: false, refOpen: null, lastCloseTime: null } }, mode: 'live', btCache: {}, btPlayback: { sym: null, candles: [], idx: 0, timer: null, playing: false, intervalMs: 1000 } };
 
     function showError(text) {
       msg.textContent = text || '';
@@ -483,19 +503,72 @@
     function showBacktestOnChart(sym) {
       const cache = state.btCache[sym]; if (!cache) return;
       // Use 1m data for detailed chart
-      const candles = (cache.m1 || []).map(c => ({ time: Math.floor(c.t/1000), open: c.o, high: c.h, low: c.l, close: c.c, t: c.t }));
+      const candles = (cache.m1 || []).map(c => ({ time: Math.floor(c.t/1000), open: c.o, high: c.h, low: c.l, close: c.c, t: c.t }))
+        .sort((a,b)=>a.t-b.t);
       if (!candles.length) return;
-      state.series.setData(candles.map(c => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })));
+      // Prepare playback: empty chart until Play
+      state.series.setData([]);
+      clearLevelLines();
       state.symbol = sym;
       title.textContent = `${state.symbol} • backtest (1m)`;
-      // Shade post-market hours visually by drawing horizontal lines at candle highs/lows within PM window (simple visual hint)
-      clearLevelLines();
-      candles.filter(c => isPostMarket(c.t)).slice(0, 50).forEach(c => {
-        // draw faint lines to hint shading; real shading would need overlays not supported in this minimal setup
-        const pl = state.series.createPriceLine({ price: c.high, color: '#334155', lineWidth: 1, lineStyle: 1, axisLabelVisible: false, title: '' });
-        state.levelLines.push(pl);
-      });
+      state.btPlayback = { sym, candles, idx: 0, timer: null, playing: false, intervalMs: state.btPlayback.intervalMs || 1000 };
+      renderPlaybackControls();
     }
+
+    function renderPlaybackControls() {
+      const p = state.btPlayback;
+      const hasData = p && p.sym && (p.candles?.length>0);
+      playBtn.disabled = !hasData || p.playing;
+      pauseBtn.disabled = !hasData || !p.playing;
+      stopBtn.disabled = !hasData || (!p.playing && p.idx===0);
+    }
+
+    function tickPlayback() {
+      const p = state.btPlayback; if (!p || !p.playing) return;
+      if (p.idx >= p.candles.length) { stopPlayback(); return; }
+      const nextIdx = p.idx + 1;
+      const slice = p.candles.slice(0, nextIdx);
+      state.series.setData(slice.map(c => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })));
+      p.idx = nextIdx;
+      if (p.idx >= p.candles.length) { stopPlayback(); }
+    }
+
+    function startPlayback() {
+      const p = state.btPlayback; if (!p || !p.candles?.length) return;
+      if (p.playing) return;
+      p.playing = true;
+      // If starting from beginning after Stop, ensure chart empty
+      if (p.idx === 0) state.series.setData([]);
+      p.timer = setInterval(tickPlayback, p.intervalMs);
+      renderPlaybackControls();
+    }
+
+    function pausePlayback() {
+      const p = state.btPlayback; if (!p || !p.playing) return;
+      clearInterval(p.timer); p.timer = null; p.playing = false;
+      renderPlaybackControls();
+    }
+
+    function stopPlayback() {
+      const p = state.btPlayback; if (!p) return;
+      if (p.timer) { clearInterval(p.timer); p.timer = null; }
+      p.playing = false; p.idx = 0;
+      state.series.setData([]);
+      renderPlaybackControls();
+    }
+
+    playBtn.onclick = startPlayback;
+    pauseBtn.onclick = pausePlayback;
+    stopBtn.onclick = stopPlayback;
+    speedSel.onchange = () => {
+      const mult = parseFloat(speedSel.value || '1');
+      state.btPlayback.intervalMs = Math.max(50, Math.floor(1000 * mult));
+      if (state.btPlayback.playing) {
+        // restart timer with new speed
+        clearInterval(state.btPlayback.timer);
+        state.btPlayback.timer = setInterval(tickPlayback, state.btPlayback.intervalMs);
+      }
+    };
 
     window.addEventListener('DOMContentLoaded', () => {
       loadDefaultStrategies();
@@ -503,6 +576,7 @@
       renderWatch();
       setMode('live');
       loadSymbol('AAPL');
+      renderPlaybackControls();
     });
   </script>
 </body>
