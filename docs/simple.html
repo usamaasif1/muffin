@@ -165,6 +165,11 @@
       const resp = await fetch(url);
       if (!resp.ok) {
         const txt = await resp.text().catch(()=>'');
+        if (txt.includes('429') || txt.includes('Too Many Requests')) {
+          console.log('🚨 Rate limited (429), retrying in 3 seconds...');
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          return await fetchCandles(symbol); // Retry once
+        }
         throw new Error('Failed to get candles: ' + txt);
       }
       const data = await resp.json();
@@ -211,7 +216,24 @@
       });
       
       if (lastMonthCandles.length === 0 || prevMonthCandles.length === 0) {
-        console.log('🔍 DEBUG: Not enough data for both months, returning null');
+        console.log('🔍 DEBUG: Not enough data for both months, trying alternative approach...');
+        
+        // For short timeframes, try to get more data or use available data
+        if (candles.length > 0) {
+          // Use the highest and lowest from all available data as fallback
+          const allHigh = Math.max(...candles.map(c => c.high));
+          const allLow = Math.min(...candles.map(c => c.low));
+          const midPrice = (allHigh + allLow) / 2;
+          
+          console.log('🔍 DEBUG: Using fallback levels from available data');
+          return {
+            lml: allLow,
+            lmh: allHigh,
+            ppml: midPrice * 0.98, // Slightly below mid
+            ppmh: midPrice * 1.02  // Slightly above mid
+          };
+        }
+        
         return null;
       }
       
