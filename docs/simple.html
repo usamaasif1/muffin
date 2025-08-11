@@ -72,6 +72,7 @@
     <!-- Levels Panel -->
     <div id="levelsPanel" style="display: none;">
       <div style="margin-bottom: 12px; font-weight: 600; color: #e5e7eb; font-size: 14px;">Monthly Levels</div>
+      <div id="levelsSource" style="margin-bottom: 8px; font-size: 11px; color: #94a3b8; font-style: italic;"></div>
       <div class="level-item">
         <span class="level-label">L.M.L:</span>
         <span class="level-value" id="lmlValue">-</span>
@@ -88,6 +89,7 @@
         <span class="level-label">P.P.M.H:</span>
         <span class="level-value" id="ppmhValue">-</span>
       </div>
+      <button id="retryLevels" style="margin-top: 12px; width: 100%; padding: 6px; background: #374151; border: 1px solid #4b5563; color: #e5e7eb; border-radius: 4px; cursor: pointer; font-size: 12px; display: none;">Retry</button>
     </div>
   </div>
 
@@ -163,15 +165,95 @@
 
     async function fetchMonthlyCandles(symbol) {
       const url = apiUrl('candles', `symbol=${encodeURIComponent(symbol)}&timespan=month&window=6`);
+      
+      // Try with retry logic and exponential backoff
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const resp = await fetch(url);
+          
+          if (resp.status === 429) {
+            // Rate limited - wait and retry
+            const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+            if (attempt < 3) {
+              await new Promise(resolve => setTimeout(resolve, waitTime));
+              continue;
+            } else {
+              throw new Error('Rate limited - please try again later');
+            }
+          }
+          
+          if (!resp.ok) {
+            const txt = await resp.text().catch(()=>'');
+            throw new Error('Failed to get monthly candles: ' + txt);
+          }
+          
+          const data = await resp.json();
+          return (data.candles || []).map(c => ({
+            time: Math.floor(c.t / 1000), open: c.o, high: c.h, low: c.l, close: c.c, t: c.t
+          }));
+          
+        } catch (error) {
+          if (attempt === 3) {
+            throw error;
+          }
+          // Wait before retry
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+    }
+
+    // Alternative approach: try to compute monthly levels from daily data if monthly fails
+    async function fetchDailyCandles(symbol) {
+      const url = apiUrl('candles', `symbol=${encodeURIComponent(symbol)}&timespan=day&window=90`);
       const resp = await fetch(url);
       if (!resp.ok) {
         const txt = await resp.text().catch(()=>'');
-        throw new Error('Failed to get monthly candles: ' + txt);
+        throw new Error('Failed to get daily candles: ' + txt);
       }
       const data = await resp.json();
       return (data.candles || []).map(c => ({
         time: Math.floor(c.t / 1000), open: c.o, high: c.h, low: c.l, close: c.c, t: c.t
       }));
+    }
+
+    function computeMonthlyLevelsFromDaily(dailyCandles) {
+      const { lastMonth, prevMonth } = getCompletedMonths();
+      
+      // Group daily candles by month
+      const monthlyGroups = {};
+      dailyCandles.forEach(candle => {
+        const date = new Date(candle.t);
+        const monthKey = `${date.getFullYear()}-${date.getMonth()}`;
+        
+        if (!monthlyGroups[monthKey]) {
+          monthlyGroups[monthKey] = [];
+        }
+        monthlyGroups[monthKey].push(candle);
+      });
+      
+      // Find last month data
+      const lastMonthKey = `${lastMonth.getFullYear()}-${lastMonth.getMonth()}`;
+      const prevMonthKey = `${prevMonth.getFullYear()}-${prevMonth.getMonth()}`;
+      
+      const lastMonthCandles = monthlyGroups[lastMonthKey] || [];
+      const prevMonthCandles = monthlyGroups[prevMonthKey] || [];
+      
+      if (lastMonthCandles.length === 0 || prevMonthCandles.length === 0) {
+        return null;
+      }
+      
+      // Compute levels
+      const lastMonthHigh = Math.max(...lastMonthCandles.map(c => c.high));
+      const lastMonthLow = Math.min(...lastMonthCandles.map(c => c.low));
+      const prevMonthHigh = Math.max(...prevMonthCandles.map(c => c.high));
+      const prevMonthLow = Math.min(...prevMonthCandles.map(c => c.low));
+      
+      return {
+        lml: lastMonthLow,
+        lmh: lastMonthHigh,
+        ppml: prevMonthLow,
+        ppmh: prevMonthHigh
+      };
     }
 
     function getCompletedMonths() {
@@ -272,7 +354,7 @@
       });
     }
 
-    function updateLevelsPanel(levels) {
+    function updateLevelsPanel(levels, source = 'monthly') {
       if (!levels) {
         document.getElementById('levelsPanel').style.display = 'none';
         return;
@@ -283,30 +365,59 @@
       document.getElementById('ppmlValue').textContent = `$${levels.ppml.toFixed(2)}`;
       document.getElementById('ppmhValue').textContent = `$${levels.ppmh.toFixed(2)}`;
       
+      // Update source indicator
+      const sourceEl = document.getElementById('levelsSource');
+      if (source === 'monthly') {
+        sourceEl.textContent = 'Source: Monthly data';
+      } else if (source === 'daily') {
+        sourceEl.textContent = 'Source: Daily data (monthly rate limited)';
+      }
+      
+      // Hide retry button when we have data
+      document.getElementById('retryLevels').style.display = 'none';
+      
       document.getElementById('levelsPanel').style.display = 'block';
     }
 
     async function loadMonthlyLevels(symbol) {
       try {
+        // First try monthly data
         const monthlyCandles = await fetchMonthlyCandles(symbol);
         const levels = computeMonthlyLevels(monthlyCandles);
         
         if (levels) {
           state.monthlyLevels = levels;
-          updateLevelsPanel(levels);
+          updateLevelsPanel(levels, 'monthly');
           drawLevelLines(levels);
-        } else {
-          state.monthlyLevels = null;
-          document.getElementById('levelsPanel').style.display = 'none';
-          clearLevelLines();
-          showError('Unable to compute monthly levels - insufficient data');
+          return;
         }
       } catch (e) {
-        state.monthlyLevels = null;
-        document.getElementById('levelsPanel').style.display = 'none';
-        clearLevelLines();
-        showError('Failed to load monthly levels: ' + String(e && e.message ? e.message : e));
+        console.log('Monthly data failed, trying daily data fallback:', e.message);
       }
+      
+      // Fallback to daily data if monthly fails
+      try {
+        const dailyCandles = await fetchDailyCandles(symbol);
+        const levels = computeMonthlyLevelsFromDaily(dailyCandles);
+        
+        if (levels) {
+          state.monthlyLevels = levels;
+          updateLevelsPanel(levels, 'daily');
+          drawLevelLines(levels);
+          showError('Monthly levels computed from daily data (monthly API rate limited)');
+          return;
+        }
+      } catch (e) {
+        console.log('Daily data fallback also failed:', e.message);
+      }
+      
+      // Both approaches failed - show retry option
+      state.monthlyLevels = null;
+      document.getElementById('levelsPanel').style.display = 'block';
+      document.getElementById('levelsSource').textContent = 'Unable to load data - API rate limited';
+      document.getElementById('retryLevels').style.display = 'block';
+      clearLevelLines();
+      showError('Unable to load monthly levels - API rate limited. Please try again later.');
     }
 
 
@@ -405,6 +516,13 @@
       window.addEventListener('resize', () => {
         if (state.monthlyLevels && state.chart) {
           setTimeout(() => drawLevelLines(state.monthlyLevels), 100);
+        }
+      });
+      
+      // Add retry button handler
+      document.getElementById('retryLevels').addEventListener('click', () => {
+        if (state.symbol) {
+          loadMonthlyLevels(state.symbol);
         }
       });
     });
