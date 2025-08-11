@@ -163,38 +163,47 @@
       }));
     }
 
-    async function fetchMonthlyCandles(symbol) {
-      // Try monthly data first, but fall back to daily if it fails
-      try {
-        const url = apiUrl('candles', `symbol=${encodeURIComponent(symbol)}&timespan=month&window=6`);
-        const resp = await fetch(url);
+    // Compute monthly levels from existing candlestick data
+    function computeMonthlyLevelsFromCandles(candles) {
+      if (!candles || candles.length === 0) return null;
+      
+      const { lastMonth, prevMonth } = getCompletedMonths();
+      
+      // Group candles by month based on their timestamp
+      const monthlyGroups = {};
+      candles.forEach(candle => {
+        const date = new Date(candle.time * 1000); // Convert back to milliseconds
+        const monthKey = `${date.getFullYear()}-${date.getMonth()}`;
         
-        if (resp.ok) {
-          const data = await resp.json();
-          return (data.candles || []).map(c => ({
-            time: Math.floor(c.t / 1000), open: c.o, high: c.h, low: c.l, close: c.c, t: c.t
-          }));
+        if (!monthlyGroups[monthKey]) {
+          monthlyGroups[monthKey] = [];
         }
-      } catch (e) {
-        console.log('Monthly API call failed, will use daily data:', e.message);
+        monthlyGroups[monthKey].push(candle);
+      });
+      
+      // Find last month data
+      const lastMonthKey = `${lastMonth.getFullYear()}-${lastMonth.getMonth()}`;
+      const prevMonthKey = `${prevMonth.getFullYear()}-${prevMonth.getMonth()}`;
+      
+      const lastMonthCandles = monthlyGroups[lastMonthKey] || [];
+      const prevMonthCandles = monthlyGroups[prevMonthKey] || [];
+      
+      if (lastMonthCandles.length === 0 || prevMonthCandles.length === 0) {
+        return null;
       }
       
-      // If monthly fails, return null to trigger daily fallback
-      return null;
-    }
-
-    // Alternative approach: try to compute monthly levels from daily data if monthly fails
-    async function fetchDailyCandles(symbol) {
-      const url = apiUrl('candles', `symbol=${encodeURIComponent(symbol)}&timespan=day&window=90`);
-      const resp = await fetch(url);
-      if (!resp.ok) {
-        const txt = await resp.text().catch(()=>'');
-        throw new Error('Failed to get daily candles: ' + txt);
-      }
-      const data = await resp.json();
-      return (data.candles || []).map(c => ({
-        time: Math.floor(c.t / 1000), open: c.o, high: c.h, low: c.l, close: c.c, t: c.t
-      }));
+      // Compute levels
+      const lastMonthHigh = Math.max(...lastMonthCandles.map(c => c.high));
+      const lastMonthLow = Math.min(...lastMonthCandles.map(c => c.low));
+      const prevMonthHigh = Math.max(...prevMonthCandles.map(c => c.high));
+      const prevMonthLow = Math.min(...prevMonthCandles.map(c => c.low));
+      
+      return {
+        lml: lastMonthLow,
+        lmh: lastMonthHigh,
+        ppml: prevMonthLow,
+        ppmh: prevMonthHigh
+      };
     }
 
     function computeMonthlyLevelsFromDaily(dailyCandles) {
@@ -352,6 +361,8 @@
         sourceEl.textContent = 'Source: Monthly data';
       } else if (source === 'daily') {
         sourceEl.textContent = 'Source: Daily data (monthly rate limited)';
+      } else if (source === 'chart') {
+        sourceEl.textContent = 'Source: Chart data';
       }
       
       // Hide retry button when we have data
@@ -362,46 +373,68 @@
 
     async function loadMonthlyLevels(symbol) {
       try {
-        // First try monthly data
-        const monthlyCandles = await fetchMonthlyCandles(symbol);
+        // Wait for chart to be ready
+        if (!state.chart || !state.series) {
+          setTimeout(() => loadMonthlyLevels(symbol), 1000);
+          return;
+        }
         
-        if (monthlyCandles && monthlyCandles.length > 0) {
-          const levels = computeMonthlyLevels(monthlyCandles);
+        // Get the candlestick data from the series
+        const seriesData = state.series.data();
+        
+        if (!seriesData || seriesData.length === 0) {
+          // Wait a bit for data to load, then try again
+          setTimeout(() => loadMonthlyLevels(symbol), 1000);
+          return;
+        }
+        
+        // Compute monthly levels from existing candlestick data
+        const levels = computeMonthlyLevelsFromCandles(seriesData);
+        
+        if (levels) {
+          state.monthlyLevels = levels;
+          updateLevelsPanel(levels, 'chart');
+          drawLevelLines(levels);
+          return;
+        } else {
+          // If we can't compute from current data, try to get more historical data
+          // by temporarily switching to a larger window
+          const originalWindow = state.window;
           
-          if (levels) {
-            state.monthlyLevels = levels;
-            updateLevelsPanel(levels, 'monthly');
-            drawLevelLines(levels);
+          if (state.window !== 'max') {
+            state.window = 'max';
+            await loadSymbol(symbol);
+            
+            // Wait for data to load, then try again
+            setTimeout(async () => {
+              const newSeriesData = state.series.data();
+              const levelsFromMax = computeMonthlyLevelsFromCandles(newSeriesData);
+              
+              if (levelsFromMax) {
+                state.monthlyLevels = levelsFromMax;
+                updateLevelsPanel(levelsFromMax, 'chart');
+                drawLevelLines(levelsFromMax);
+              }
+              
+              // Restore original window
+              state.window = originalWindow;
+              await loadSymbol(symbol);
+            }, 2000);
+            
             return;
           }
         }
       } catch (e) {
-        console.log('Monthly data failed, trying daily data fallback:', e.message);
+        console.log('Failed to compute monthly levels from chart data:', e.message);
       }
       
-      // Fallback to daily data if monthly fails or returns no data
-      try {
-        const dailyCandles = await fetchDailyCandles(symbol);
-        const levels = computeMonthlyLevelsFromDaily(dailyCandles);
-        
-        if (levels) {
-          state.monthlyLevels = levels;
-          updateLevelsPanel(levels, 'daily');
-          drawLevelLines(levels);
-          showError('Monthly levels computed from daily data (monthly API unavailable)');
-          return;
-        }
-      } catch (e) {
-        console.log('Daily data fallback also failed:', e.message);
-      }
-      
-      // Both approaches failed - show retry option
+      // If all approaches failed - show retry option
       state.monthlyLevels = null;
       document.getElementById('levelsPanel').style.display = 'block';
-      document.getElementById('levelsSource').textContent = 'Unable to load data - API unavailable';
+      document.getElementById('levelsSource').textContent = 'Unable to compute monthly levels from chart data';
       document.getElementById('retryLevels').style.display = 'block';
       clearLevelLines();
-      showError('Unable to load monthly levels - API unavailable. Please try again later.');
+      showError('Unable to compute monthly levels from available chart data. Please try again later.');
     }
 
 
