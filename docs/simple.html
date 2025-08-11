@@ -28,6 +28,16 @@
     #go { padding: 8px 12px; border-radius: 8px; border: 1px solid #374151; background: #2563eb; color: white; cursor: pointer; }
     #add { padding: 8px 12px; border-radius: 8px; border: 1px solid #374151; background: #10b981; color: white; cursor: pointer; }
     #apiBadge { margin-left: 10px; font-size: 12px; color: #94a3b8; }
+    #levelsPanel { position: fixed; right: 20px; top: 80px; width: 200px; background: #0f172a; border: 1px solid #374151; border-radius: 8px; padding: 16px; z-index: 1000; }
+    .level-item { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px; }
+    .level-item:last-child { margin-bottom: 0; }
+    .level-label { color: #94a3b8; }
+    .level-value { color: #e5e7eb; font-weight: 500; }
+    .level-line { position: absolute; height: 1px; width: 100%; opacity: 0.7; }
+    .level-line.lml { background: #60a5fa; }
+    .level-line.lmh { background: #10b981; }
+    .level-line.ppml { background: #f59e0b; }
+    .level-line.ppmh { background: #ef4444; }
   </style>
 </head>
 <body>
@@ -58,6 +68,27 @@
       </aside>
       <div id="chart"></div>
     </main>
+    
+    <!-- Levels Panel -->
+    <div id="levelsPanel" style="display: none;">
+      <div style="margin-bottom: 12px; font-weight: 600; color: #e5e7eb; font-size: 14px;">Monthly Levels</div>
+      <div class="level-item">
+        <span class="level-label">L.M.L:</span>
+        <span class="level-value" id="lmlValue">-</span>
+      </div>
+      <div class="level-item">
+        <span class="level-label">L.M.H:</span>
+        <span class="level-value" id="lmhValue">-</span>
+      </div>
+      <div class="level-item">
+        <span class="level-label">P.P.M.L:</span>
+        <span class="level-value" id="ppmlValue">-</span>
+      </div>
+      <div class="level-item">
+        <span class="level-label">P.P.M.H:</span>
+        <span class="level-value" id="ppmhValue">-</span>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -87,6 +118,8 @@
       chart: null,
       series: null,
       watch: JSON.parse(localStorage.getItem('simple.watch') || '[]'),
+      monthlyLevels: null,
+      levelLines: []
     };
 
     function apiUrl(endpoint, query) {
@@ -128,6 +161,154 @@
       }));
     }
 
+    async function fetchMonthlyCandles(symbol) {
+      const url = apiUrl('candles', `symbol=${encodeURIComponent(symbol)}&timespan=month&window=6`);
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        const txt = await resp.text().catch(()=>'');
+        throw new Error('Failed to get monthly candles: ' + txt);
+      }
+      const data = await resp.json();
+      return (data.candles || []).map(c => ({
+        time: Math.floor(c.t / 1000), open: c.o, high: c.h, low: c.l, close: c.c, t: c.t
+      }));
+    }
+
+    function getCompletedMonths() {
+      const now = new Date();
+      const nyTime = new Date(now.toLocaleString("en-US", {timeZone: "America/New_York"}));
+      
+      // Get the first day of current month
+      const currentMonthStart = new Date(nyTime.getFullYear(), nyTime.getMonth(), 1);
+      
+      // If we're still in the current month, go back to previous month
+      if (nyTime.getTime() < currentMonthStart.getTime()) {
+        nyTime.setMonth(nyTime.getMonth() - 1);
+      }
+      
+      // Get last two completed months
+      const lastMonth = new Date(nyTime.getFullYear(), nyTime.getMonth() - 1, 1);
+      const prevMonth = new Date(nyTime.getFullYear(), nyTime.getMonth() - 2, 1);
+      
+      return { lastMonth, prevMonth };
+    }
+
+    function computeMonthlyLevels(monthlyCandles) {
+      const { lastMonth, prevMonth } = getCompletedMonths();
+      
+      // Find candles for last completed month
+      const lastMonthCandles = monthlyCandles.filter(c => {
+        const candleDate = new Date(c.t);
+        return candleDate.getFullYear() === lastMonth.getFullYear() && 
+               candleDate.getMonth() === lastMonth.getMonth();
+      });
+      
+      // Find candles for previous completed month
+      const prevMonthCandles = monthlyCandles.filter(c => {
+        const candleDate = new Date(c.t);
+        return candleDate.getFullYear() === prevMonth.getFullYear() && 
+               candleDate.getMonth() === prevMonth.getMonth();
+      });
+      
+      if (lastMonthCandles.length === 0 || prevMonthCandles.length === 0) {
+        return null;
+      }
+      
+      // Compute levels for last month
+      const lastMonthHigh = Math.max(...lastMonthCandles.map(c => c.high));
+      const lastMonthLow = Math.min(...lastMonthCandles.map(c => c.low));
+      
+      // Compute levels for previous month
+      const prevMonthHigh = Math.max(...prevMonthCandles.map(c => c.high));
+      const prevMonthLow = Math.min(...prevMonthCandles.map(c => c.low));
+      
+      return {
+        lml: lastMonthLow,
+        lmh: lastMonthHigh,
+        ppml: prevMonthLow,
+        ppmh: prevMonthHigh
+      };
+    }
+
+    function clearLevelLines() {
+      state.levelLines.forEach(line => {
+        if (line && line.remove) line.remove();
+      });
+      state.levelLines = [];
+    }
+
+    function drawLevelLines(levels) {
+      if (!state.chart || !levels) return;
+      
+      clearLevelLines();
+      
+      const chartContainer = document.getElementById('chart');
+      const rect = chartContainer.getBoundingClientRect();
+      
+      const lineConfigs = [
+        { level: levels.lml, class: 'lml', label: 'L.M.L' },
+        { level: levels.lmh, class: 'lmh', label: 'L.M.H' },
+        { level: levels.ppml, class: 'ppml', label: 'P.P.M.L' },
+        { level: levels.ppmh, class: 'ppmh', label: 'P.P.M.H' }
+      ];
+      
+      lineConfigs.forEach(config => {
+        const line = document.createElement('div');
+        line.className = `level-line ${config.class}`;
+        line.style.position = 'absolute';
+        line.style.left = '0';
+        line.style.right = '0';
+        line.style.zIndex = '100';
+        
+        // Position the line at the correct price level
+        const priceScale = state.chart.priceScale('right');
+        const y = priceScale.priceToCoordinate(config.level);
+        
+        if (y !== null && !isNaN(y)) {
+          line.style.top = `${y}px`;
+          chartContainer.appendChild(line);
+          state.levelLines.push(line);
+        }
+      });
+    }
+
+    function updateLevelsPanel(levels) {
+      if (!levels) {
+        document.getElementById('levelsPanel').style.display = 'none';
+        return;
+      }
+      
+      document.getElementById('lmlValue').textContent = `$${levels.lml.toFixed(2)}`;
+      document.getElementById('lmhValue').textContent = `$${levels.lmh.toFixed(2)}`;
+      document.getElementById('ppmlValue').textContent = `$${levels.ppml.toFixed(2)}`;
+      document.getElementById('ppmhValue').textContent = `$${levels.ppmh.toFixed(2)}`;
+      
+      document.getElementById('levelsPanel').style.display = 'block';
+    }
+
+    async function loadMonthlyLevels(symbol) {
+      try {
+        const monthlyCandles = await fetchMonthlyCandles(symbol);
+        const levels = computeMonthlyLevels(monthlyCandles);
+        
+        if (levels) {
+          state.monthlyLevels = levels;
+          updateLevelsPanel(levels);
+          drawLevelLines(levels);
+        } else {
+          state.monthlyLevels = null;
+          document.getElementById('levelsPanel').style.display = 'none';
+          clearLevelLines();
+          showError('Unable to compute monthly levels - insufficient data');
+        }
+      } catch (e) {
+        state.monthlyLevels = null;
+        document.getElementById('levelsPanel').style.display = 'none';
+        clearLevelLines();
+        showError('Failed to load monthly levels: ' + String(e && e.message ? e.message : e));
+      }
+    }
+
 
 
     async function loadSymbol(symbol) {
@@ -147,6 +328,9 @@
         state.symbol = symbol.toUpperCase();
         title.textContent = `${state.symbol} • ${state.timespan}`;
         renderWatch();
+        
+        // Load monthly levels for the new symbol
+        await loadMonthlyLevels(symbol);
       } catch (e) {
         showError(String(e && e.message ? e.message : e));
       }
@@ -204,6 +388,11 @@
       btn.addEventListener('click', async () => {
         state.timespan = btn.getAttribute('data-tf');
         await loadSymbol(state.symbol);
+        
+        // Redraw level lines for the new timeframe (without recomputing levels)
+        if (state.monthlyLevels) {
+          setTimeout(() => drawLevelLines(state.monthlyLevels), 100);
+        }
       });
     });
 
@@ -211,6 +400,13 @@
       apiBadge.textContent = `API: ${API_BASE_URL}`;
       renderWatch();
       loadSymbol('AAPL');
+      
+      // Add chart resize handler
+      window.addEventListener('resize', () => {
+        if (state.monthlyLevels && state.chart) {
+          setTimeout(() => drawLevelLines(state.monthlyLevels), 100);
+        }
+      });
     });
   })();
   </script>
