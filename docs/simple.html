@@ -21,7 +21,7 @@
     #watch { display: flex; flex-direction: column; gap: 6px; }
     .watch-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border: 1px solid #374151; border-radius: 8px; cursor: pointer; }
     .watch-item .rm { margin-left: 10px; color: #fca5a5; cursor: pointer; }
-    #chart { width: 100%; height: calc(100vh - 54px); }
+    #chart { width: 100%; height: calc(100vh - 54px); position: relative; }
     #msg { padding: 6px 12px; color: #fca5a5; font-size: 13px; white-space: pre-wrap; }
     #topbar { display:flex; gap:10px; align-items:center; }
     #search { width: 320px; padding: 8px 10px; border-radius: 8px; border: 1px solid #374151; background: #0a0f20; color: #e5e7eb; }
@@ -33,7 +33,14 @@
     .level-item:last-child { margin-bottom: 0; }
     .level-label { color: #94a3b8; }
     .level-value { color: #e5e7eb; font-weight: 500; }
-    .level-line { position: absolute; height: 1px; width: 100%; opacity: 0.7; }
+    .level-line { 
+      position: absolute; 
+      height: 3px; 
+      width: 100%; 
+      opacity: 0.9; 
+      z-index: 1000;
+      pointer-events: none;
+    }
     .level-line.lml { background: #60a5fa; }
     .level-line.lmh { background: #10b981; }
     .level-line.ppml { background: #f59e0b; }
@@ -314,8 +321,13 @@
       
       clearLevelLines();
       
+      // Get the chart container and ensure it has proper positioning
       const chartContainer = document.getElementById('chart');
-      const rect = chartContainer.getBoundingClientRect();
+      if (!chartContainer) return;
+      
+      // Get the chart's dimensions and position
+      const chartRect = chartContainer.getBoundingClientRect();
+      const chartStyle = window.getComputedStyle(chartContainer);
       
       // Get the current candlestick data
       const seriesData = state.series.data();
@@ -336,7 +348,8 @@
         minPrice,
         maxPrice,
         priceRange,
-        chartHeight: rect.height
+        chartHeight: chartRect.height,
+        chartWidth: chartRect.width
       });
       
       const lineConfigs = [
@@ -349,37 +362,46 @@
       lineConfigs.forEach(config => {
         // Calculate Y position based on price level relative to overall range
         const pricePosition = (config.level - minPrice) / priceRange;
-        const y = rect.height * (1 - pricePosition); // Invert Y axis (0 is top)
+        const y = chartRect.height * (1 - pricePosition); // Invert Y axis (0 is top)
         
         console.log(`Line ${config.label}:`, {
           price: config.level,
           pricePosition,
           y,
-          isValid: y >= 0 && y <= rect.height
+          isValid: y >= 0 && y <= chartRect.height
         });
         
-        if (y >= 0 && y <= rect.height) {
+        if (y >= 0 && y <= chartRect.height) {
           const line = document.createElement('div');
           line.className = `level-line ${config.class}`;
+          
+          // Fix positioning - use fixed positioning relative to chart container
           line.style.position = 'absolute';
-          line.style.left = '0';
-          line.style.right = '0';
+          line.style.left = '0px';
+          line.style.right = '0px';
           line.style.top = `${y}px`;
-          line.style.zIndex = '100';
-          line.style.height = '2px'; // Make lines more visible
+          line.style.width = '100%';
+          line.style.height = '3px'; // Make lines more visible
+          line.style.zIndex = '1000'; // Ensure lines appear above everything
           line.style.backgroundColor = getLineColor(config.class);
+          line.style.pointerEvents = 'none'; // Prevent lines from blocking chart interaction
           
           // Add label on the right side
           const label = document.createElement('span');
           label.textContent = config.label;
           label.style.position = 'absolute';
-          label.style.right = '10px';
-          label.style.top = '-8px';
-          label.style.fontSize = '10px';
+          label.style.right = '15px';
+          label.style.top = '-10px';
+          label.style.fontSize = '11px';
           label.style.color = getLineColor(config.class);
           label.style.fontWeight = 'bold';
+          label.style.backgroundColor = 'rgba(0,0,0,0.8)';
+          label.style.padding = '2px 6px';
+          label.style.borderRadius = '3px';
+          label.style.pointerEvents = 'none';
           line.appendChild(label);
           
+          // Append to chart container
           chartContainer.appendChild(line);
           state.levelLines.push(line);
           
