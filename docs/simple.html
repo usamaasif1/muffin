@@ -497,7 +497,9 @@
         console.log('🔍 DEBUG: Levels computed from candles:', levels);
         
         if (levels) {
+          // Store the levels and mark them as computed for this symbol
           state.monthlyLevels = levels;
+          state.lastComputedSymbol = symbol;
           console.log('🔍 DEBUG: Levels stored in state:', state.monthlyLevels);
           
           updateLevelsPanel(levels, 'chart');
@@ -521,7 +523,9 @@
               const levelsFromMax = computeMonthlyLevelsFromCandles(newSeriesData);
               
               if (levelsFromMax) {
+                // Store the levels and mark them as computed for this symbol
                 state.monthlyLevels = levelsFromMax;
+                state.lastComputedSymbol = symbol;
                 updateLevelsPanel(levelsFromMax, 'chart');
                 drawLevelLines(levelsFromMax);
               }
@@ -567,8 +571,16 @@
         title.textContent = `${state.symbol} • ${state.timespan}`;
         renderWatch();
         
-        // Load monthly levels for the new symbol
-        await loadMonthlyLevels(symbol);
+        // Load monthly levels for the new symbol (only if symbol changed or no levels exist)
+        if (state.lastComputedSymbol !== symbol || !state.monthlyLevels) {
+          await loadMonthlyLevels(symbol);
+        } else {
+          console.log('🔍 DEBUG: Reusing existing levels for symbol:', symbol);
+          // Redraw existing levels for the new timeframe
+          if (state.monthlyLevels) {
+            drawLevelLines(state.monthlyLevels);
+          }
+        }
       } catch (e) {
         showError(String(e && e.message ? e.message : e));
       }
@@ -629,7 +641,8 @@
         
         // Redraw level lines for the new timeframe (without recomputing levels)
         if (state.monthlyLevels) {
-          setTimeout(() => drawLevelLines(state.monthlyLevels), 100);
+          console.log('🔍 DEBUG: Redrawing levels for timeframe change:', state.timespan);
+          drawLevelLines(state.monthlyLevels);
         }
       });
     });
@@ -642,7 +655,8 @@
       // Add chart resize handler
       window.addEventListener('resize', () => {
         if (state.monthlyLevels && state.chart) {
-          setTimeout(() => drawLevelLines(state.monthlyLevels), 100);
+          console.log('🔍 DEBUG: Redrawing levels for window resize');
+          drawLevelLines(state.monthlyLevels);
         }
       });
       
