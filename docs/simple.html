@@ -348,11 +348,20 @@
 
     function drawLevelLines(levels) {
       // 🚨 THIS IS A COMPLETELY NEW FUNCTION - IF YOU SEE THIS, THE CODE IS UPDATING!
-      alert('🚨 CODE UPDATED! NEW FUNCTION IS RUNNING! TIMESTAMP: ' + new Date().toISOString());
       console.log('🚨 CODE UPDATED! NEW FUNCTION IS RUNNING! TIMESTAMP:', new Date().toISOString());
-      console.log('🚨 THIS IS THE NEW VERSION 3.1 WITH CHART LIBRARY!');
+      console.log('🚨 THIS IS THE NEW VERSION 3.2 WITH CHART LIBRARY!');
       
       if (!state.chart || !levels) return;
+      
+      // Check if we already have the same levels drawn
+      if (state.lastDrawnLevels && 
+          state.lastDrawnLevels.lml === levels.lml &&
+          state.lastDrawnLevels.lmh === levels.lmh &&
+          state.lastDrawnLevels.ppml === levels.ppml &&
+          state.lastDrawnLevels.ppmh === levels.ppmh) {
+        console.log('🚨 Levels already drawn, skipping duplicate draw');
+        return;
+      }
       
       clearLevelLines();
       
@@ -404,6 +413,15 @@
           title: 'P.P.M.H' 
         }));
       }
+      
+      // Store the levels we just drew to prevent duplicates
+      state.lastDrawnLevels = {
+        lml: levels.lml,
+        lmh: levels.lmh,
+        ppml: levels.ppml,
+        ppmh: levels.ppmh
+      };
+      console.log('🚨 Levels drawn and stored:', state.lastDrawnLevels);
     }
     
     function getLineColor(className) {
