@@ -317,24 +317,27 @@
       const chartContainer = document.getElementById('chart');
       const rect = chartContainer.getBoundingClientRect();
       
-      // Get the chart's visible price range
-      const timeRange = state.chart.timeScale().getVisibleLogicalRange();
-      if (!timeRange) return;
-      
-      // Get the current candlestick data to find price range
+      // Get the current candlestick data
       const seriesData = state.series.data();
       if (!seriesData || seriesData.length === 0) return;
       
-      // Find the visible price range
-      const visibleData = seriesData.filter(candle => 
-        candle.time >= timeRange.from && candle.time <= timeRange.to
-      );
+      // Find the overall price range from all data
+      const allPrices = [];
+      seriesData.forEach(candle => {
+        allPrices.push(candle.low, candle.high);
+      });
       
-      if (visibleData.length === 0) return;
-      
-      const minPrice = Math.min(...visibleData.map(c => c.low));
-      const maxPrice = Math.max(...visibleData.map(c => c.high));
+      const minPrice = Math.min(...allPrices);
+      const maxPrice = Math.max(...allPrices);
       const priceRange = maxPrice - minPrice;
+      
+      console.log('Drawing level lines:', {
+        levels,
+        minPrice,
+        maxPrice,
+        priceRange,
+        chartHeight: rect.height
+      });
       
       const lineConfigs = [
         { level: levels.lml, class: 'lml', label: 'L.M.L' },
@@ -344,9 +347,16 @@
       ];
       
       lineConfigs.forEach(config => {
-        // Calculate Y position based on price level relative to visible range
+        // Calculate Y position based on price level relative to overall range
         const pricePosition = (config.level - minPrice) / priceRange;
         const y = rect.height * (1 - pricePosition); // Invert Y axis (0 is top)
+        
+        console.log(`Line ${config.label}:`, {
+          price: config.level,
+          pricePosition,
+          y,
+          isValid: y >= 0 && y <= rect.height
+        });
         
         if (y >= 0 && y <= rect.height) {
           const line = document.createElement('div');
@@ -356,11 +366,36 @@
           line.style.right = '0';
           line.style.top = `${y}px`;
           line.style.zIndex = '100';
+          line.style.height = '2px'; // Make lines more visible
+          line.style.backgroundColor = getLineColor(config.class);
+          
+          // Add label on the right side
+          const label = document.createElement('span');
+          label.textContent = config.label;
+          label.style.position = 'absolute';
+          label.style.right = '10px';
+          label.style.top = '-8px';
+          label.style.fontSize = '10px';
+          label.style.color = getLineColor(config.class);
+          label.style.fontWeight = 'bold';
+          line.appendChild(label);
           
           chartContainer.appendChild(line);
           state.levelLines.push(line);
+          
+          console.log(`Created line for ${config.label} at y=${y}`);
         }
       });
+    }
+    
+    function getLineColor(className) {
+      const colors = {
+        lml: '#60a5fa',    // Blue
+        lmh: '#10b981',    // Green
+        ppml: '#f59e0b',   // Orange
+        ppmh: '#ef4444'    // Red
+      };
+      return colors[className] || '#ffffff';
     }
 
     function updateLevelsPanel(levels, source = 'monthly') {
