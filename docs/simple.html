@@ -7,10 +7,13 @@
 </script>
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AAPL Chart (Simple)</title>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>AAPL Chart (Simple)</title>
   <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
   <style>
     html, body { height: 100%; margin: 0; background: #0b1022; color: #e5e7eb; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto; }
@@ -170,7 +173,7 @@
       }));
     }
 
-    // Compute monthly levels from existing candlestick data
+    // Compute monthly levels from existing candlestick data (FIRST FUNCTION)
     function computeMonthlyLevelsFromCandles(candles) {
       console.log('🔍 DEBUG: computeMonthlyLevelsFromCandles called with:', candles.length, 'candles');
       console.log('🔍 DEBUG: First few candles:', candles.slice(0, 3));
@@ -192,14 +195,23 @@
         monthlyGroups[monthKey].push(candle);
       });
       
-      // Find last month data
+      // Find last month data (FIRST FUNCTION)
       const lastMonthKey = `${lastMonth.getFullYear()}-${lastMonth.getMonth()}`;
       const prevMonthKey = `${prevMonth.getFullYear()}-${prevMonth.getMonth()}`;
+      
+      console.log('🔍 DEBUG: Month keys being searched:', { lastMonthKey, prevMonthKey });
+      console.log('🔍 DEBUG: Available month keys:', Object.keys(monthlyGroups));
       
       const lastMonthCandles = monthlyGroups[lastMonthKey] || [];
       const prevMonthCandles = monthlyGroups[prevMonthKey] || [];
       
+      console.log('🔍 DEBUG: Candles found for months:', {
+        lastMonth: lastMonthCandles.length,
+        prevMonth: prevMonthCandles.length
+      });
+      
       if (lastMonthCandles.length === 0 || prevMonthCandles.length === 0) {
+        console.log('🔍 DEBUG: Not enough data for both months, returning null');
         return null;
       }
       
@@ -209,12 +221,20 @@
       const prevMonthHigh = Math.max(...prevMonthCandles.map(c => c.high));
       const prevMonthLow = Math.min(...prevMonthCandles.map(c => c.low));
       
-      return {
+      const result = {
         lml: lastMonthLow,
         lmh: lastMonthHigh,
         ppml: prevMonthLow,
         ppmh: prevMonthHigh
       };
+      
+      console.log('🔍 DEBUG: Computed levels result:', {
+        lml: lastMonthLow,
+        lmh: lastMonthHigh,
+        ppml: prevMonthLow,
+        ppmh: prevMonthHigh
+      });
+      return result;
     }
 
     function computeMonthlyLevelsFromDaily(dailyCandles) {
@@ -327,106 +347,63 @@
     }
 
     function drawLevelLines(levels) {
-      console.log('🔍 DEBUG: drawLevelLines called with levels:', levels);
-      console.log('🔍 DEBUG: Levels object keys:', Object.keys(levels));
-      console.log('🔍 DEBUG: Individual level values:', {
-        lml: levels.lml,
-        lmh: levels.lmh,
-        ppml: levels.ppml,
-        ppmh: levels.ppmh
-      });
+      // 🚨 THIS IS A COMPLETELY NEW FUNCTION - IF YOU SEE THIS, THE CODE IS UPDATING!
+      alert('🚨 CODE UPDATED! NEW FUNCTION IS RUNNING! TIMESTAMP: ' + new Date().toISOString());
+      console.log('🚨 CODE UPDATED! NEW FUNCTION IS RUNNING! TIMESTAMP:', new Date().toISOString());
+      console.log('🚨 THIS IS THE NEW VERSION 3.1 WITH CHART LIBRARY!');
       
       if (!state.chart || !levels) return;
       
       clearLevelLines();
       
-      // Get the chart container and ensure it has proper positioning
-      const chartContainer = document.getElementById('chart');
-      if (!chartContainer) return;
+      // Use the chart library's built-in createPriceLine method for accurate positioning
+      if (levels.lml != null) {
+        console.log('🚨 Creating L.M.L line at price:', levels.lml);
+        state.levelLines.push(state.series.createPriceLine({ 
+          price: levels.lml, 
+          color: '#94a3b8', 
+          lineWidth: 2, 
+          lineStyle: 1, 
+          axisLabelVisible: true, 
+          title: 'L.M.L' 
+        }));
+      }
       
-      // Get the chart's dimensions and position
-      const chartRect = chartContainer.getBoundingClientRect();
-      const chartStyle = window.getComputedStyle(chartContainer);
+      if (levels.lmh != null) {
+        console.log('🚨 Creating L.M.H line at price:', levels.lmh);
+        state.levelLines.push(state.series.createPriceLine({ 
+          price: levels.lmh, 
+          color: '#94a3b8', 
+          lineWidth: 2, 
+          lineStyle: 1, 
+          axisLabelVisible: true, 
+          title: 'L.M.H' 
+        }));
+      }
       
-      // Get the current candlestick data
-      const seriesData = state.series.data();
-      if (!seriesData || seriesData.length === 0) return;
+      if (levels.ppml != null) {
+        console.log('🚨 Creating P.P.M.L line at price:', levels.ppml);
+        state.levelLines.push(state.series.createPriceLine({ 
+          price: levels.ppml, 
+          color: '#38bdf8', 
+          lineWidth: 2, 
+          lineStyle: 2, 
+          axisLabelVisible: true, 
+          title: 'P.P.M.L' 
+        }));
+      }
       
-      // Find the overall price range from all data
-      const allPrices = [];
-      seriesData.forEach(candle => {
-        allPrices.push(candle.low, candle.high);
-      });
-      
-      const minPrice = Math.min(...allPrices);
-      const maxPrice = Math.max(...allPrices);
-      const priceRange = maxPrice - minPrice;
-      
-      console.log('Drawing level lines:', {
-        levels,
-        minPrice,
-        maxPrice,
-        priceRange,
-        chartHeight: chartRect.height,
-        chartWidth: chartRect.width
-      });
-      
-      const lineConfigs = [
-        { level: levels.lml, class: 'lml', label: 'L.M.L' },
-        { level: levels.lmh, class: 'lmh', label: 'L.M.H' },
-        { level: levels.ppml, class: 'ppml', label: 'P.P.M.L' },
-        { level: levels.ppmh, class: 'ppmh', label: 'P.P.M.H' }
-      ];
-      
-      lineConfigs.forEach(config => {
-        // Calculate Y position based on price level relative to overall range
-        const pricePosition = (config.level - minPrice) / priceRange;
-        const y = chartRect.height * (1 - pricePosition); // Invert Y axis (0 is top)
-        
-        console.log(`Line ${config.label}:`, {
-          price: config.level,
-          pricePosition,
-          y,
-          isValid: y >= 0 && y <= chartRect.height
-        });
-        
-        if (y >= 0 && y <= chartRect.height) {
-          const line = document.createElement('div');
-          line.className = `level-line ${config.class}`;
-          
-          // Fix positioning - use fixed positioning relative to chart container
-          line.style.position = 'absolute';
-          line.style.left = '0px';
-          line.style.right = '0px';
-          line.style.top = `${y}px`;
-          line.style.width = '100%';
-          line.style.height = '3px'; // Make lines more visible
-          line.style.zIndex = '1000'; // Ensure lines appear above everything
-          line.style.backgroundColor = getLineColor(config.class);
-          line.style.pointerEvents = 'none'; // Prevent lines from blocking chart interaction
-          
-          // Add label on the right side
-          const label = document.createElement('span');
-          label.textContent = config.label;
-          label.style.position = 'absolute';
-          label.style.right = '15px';
-          label.style.top = '-10px';
-          label.style.fontSize = '11px';
-          label.style.color = getLineColor(config.class);
-          label.style.fontWeight = 'bold';
-          label.style.backgroundColor = 'rgba(0,0,0,0.8)';
-          label.style.padding = '2px 6px';
-          label.style.borderRadius = '3px';
-          label.style.pointerEvents = 'none';
-          line.appendChild(label);
-          
-          // Append to chart container
-          chartContainer.appendChild(line);
-          state.levelLines.push(line);
-          
-          console.log(`Created line for ${config.label} at y=${y}`);
-        }
-      });
+      if (levels.ppmh != null) {
+        console.log('🚨 Creating P.P.M.H line at price:', levels.ppmh);
+        state.levelLines.push(state.series.createPriceLine({ 
+          price: levels.ppmh, 
+          color: '#38bdf8', 
+          lineWidth: 2, 
+          lineStyle: 2, 
+          axisLabelVisible: true, 
+          title: 'P.P.M.H' 
+        }));
+      }
     }
     
     function getLineColor(className) {
@@ -440,7 +417,12 @@
     }
 
     function updateLevelsPanel(levels, source = 'monthly') {
-      console.log('🔍 DEBUG: updateLevelsPanel called with levels:', levels);
+      console.log('🔍 DEBUG: updateLevelsPanel called with levels:', {
+        lml: levels.lml,
+        lmh: levels.lmh,
+        ppml: levels.ppml,
+        ppmh: levels.ppmh
+      });
       console.log('🔍 DEBUG: Panel values being set:', {
         lml: levels.lml,
         lmh: levels.lmh,
@@ -494,18 +476,40 @@
         // Compute monthly levels from existing candlestick data
         const levels = computeMonthlyLevelsFromCandles(seriesData);
         
-        console.log('🔍 DEBUG: Levels computed from candles:', levels);
+        alert('🔄 NEW CODE IS RUNNING! VERSION 1.0 - LEVELS COMPUTED - TIMESTAMP: ' + new Date().toISOString());
+        console.log('🔄 FORCED REFRESH - NEW CODE VERSION 1.0 - TIMESTAMP:', new Date().toISOString());
+        console.log('🔍 DEBUG: Levels computed from candles:', {
+          lml: levels.lml,
+          lmh: levels.lmh,
+          ppml: levels.ppml,
+          ppmh: levels.ppmh
+        });
         
         if (levels) {
           // Store the levels and mark them as computed for this symbol
           state.monthlyLevels = levels;
           state.lastComputedSymbol = symbol;
-          console.log('🔍 DEBUG: Levels stored in state:', state.monthlyLevels);
+          console.log('🔍 DEBUG: Levels stored in state:', {
+            lml: state.monthlyLevels.lml,
+            lmh: state.monthlyLevels.lmh,
+            ppml: state.monthlyLevels.ppml,
+            ppmh: state.monthlyLevels.ppmh
+          });
           
           updateLevelsPanel(levels, 'chart');
-          console.log('🔍 DEBUG: Levels panel updated with:', levels);
+          console.log('🔍 DEBUG: Levels panel updated with:', {
+            lml: levels.lml,
+            lmh: levels.lmh,
+            ppml: levels.ppml,
+            ppmh: levels.ppmh
+          });
           
-          console.log('🔍 DEBUG: About to call drawLevelLines with:', levels);
+          console.log('🔍 DEBUG: About to call drawLevelLines with:', {
+            lml: levels.lml,
+            lmh: levels.lmh,
+            ppml: levels.ppml,
+            ppmh: levels.ppmh
+          });
           drawLevelLines(levels);
           return;
         } else {
