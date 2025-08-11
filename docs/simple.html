@@ -164,42 +164,23 @@
     }
 
     async function fetchMonthlyCandles(symbol) {
-      const url = apiUrl('candles', `symbol=${encodeURIComponent(symbol)}&timespan=month&window=6`);
-      
-      // Try with retry logic and exponential backoff
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-          const resp = await fetch(url);
-          
-          if (resp.status === 429) {
-            // Rate limited - wait and retry
-            const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
-            if (attempt < 3) {
-              await new Promise(resolve => setTimeout(resolve, waitTime));
-              continue;
-            } else {
-              throw new Error('Rate limited - please try again later');
-            }
-          }
-          
-          if (!resp.ok) {
-            const txt = await resp.text().catch(()=>'');
-            throw new Error('Failed to get monthly candles: ' + txt);
-          }
-          
+      // Try monthly data first, but fall back to daily if it fails
+      try {
+        const url = apiUrl('candles', `symbol=${encodeURIComponent(symbol)}&timespan=month&window=6`);
+        const resp = await fetch(url);
+        
+        if (resp.ok) {
           const data = await resp.json();
           return (data.candles || []).map(c => ({
             time: Math.floor(c.t / 1000), open: c.o, high: c.h, low: c.l, close: c.c, t: c.t
           }));
-          
-        } catch (error) {
-          if (attempt === 3) {
-            throw error;
-          }
-          // Wait before retry
-          await new Promise(resolve => setTimeout(resolve, 1000));
         }
+      } catch (e) {
+        console.log('Monthly API call failed, will use daily data:', e.message);
       }
+      
+      // If monthly fails, return null to trigger daily fallback
+      return null;
     }
 
     // Alternative approach: try to compute monthly levels from daily data if monthly fails
@@ -383,19 +364,22 @@
       try {
         // First try monthly data
         const monthlyCandles = await fetchMonthlyCandles(symbol);
-        const levels = computeMonthlyLevels(monthlyCandles);
         
-        if (levels) {
-          state.monthlyLevels = levels;
-          updateLevelsPanel(levels, 'monthly');
-          drawLevelLines(levels);
-          return;
+        if (monthlyCandles && monthlyCandles.length > 0) {
+          const levels = computeMonthlyLevels(monthlyCandles);
+          
+          if (levels) {
+            state.monthlyLevels = levels;
+            updateLevelsPanel(levels, 'monthly');
+            drawLevelLines(levels);
+            return;
+          }
         }
       } catch (e) {
         console.log('Monthly data failed, trying daily data fallback:', e.message);
       }
       
-      // Fallback to daily data if monthly fails
+      // Fallback to daily data if monthly fails or returns no data
       try {
         const dailyCandles = await fetchDailyCandles(symbol);
         const levels = computeMonthlyLevelsFromDaily(dailyCandles);
@@ -404,7 +388,7 @@
           state.monthlyLevels = levels;
           updateLevelsPanel(levels, 'daily');
           drawLevelLines(levels);
-          showError('Monthly levels computed from daily data (monthly API rate limited)');
+          showError('Monthly levels computed from daily data (monthly API unavailable)');
           return;
         }
       } catch (e) {
@@ -414,10 +398,10 @@
       // Both approaches failed - show retry option
       state.monthlyLevels = null;
       document.getElementById('levelsPanel').style.display = 'block';
-      document.getElementById('levelsSource').textContent = 'Unable to load data - API rate limited';
+      document.getElementById('levelsSource').textContent = 'Unable to load data - API unavailable';
       document.getElementById('retryLevels').style.display = 'block';
       clearLevelLines();
-      showError('Unable to load monthly levels - API rate limited. Please try again later.');
+      showError('Unable to load monthly levels - API unavailable. Please try again later.');
     }
 
 
