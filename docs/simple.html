@@ -317,6 +317,25 @@
       const chartContainer = document.getElementById('chart');
       const rect = chartContainer.getBoundingClientRect();
       
+      // Get the chart's visible price range
+      const timeRange = state.chart.timeScale().getVisibleLogicalRange();
+      if (!timeRange) return;
+      
+      // Get the current candlestick data to find price range
+      const seriesData = state.series.data();
+      if (!seriesData || seriesData.length === 0) return;
+      
+      // Find the visible price range
+      const visibleData = seriesData.filter(candle => 
+        candle.time >= timeRange.from && candle.time <= timeRange.to
+      );
+      
+      if (visibleData.length === 0) return;
+      
+      const minPrice = Math.min(...visibleData.map(c => c.low));
+      const maxPrice = Math.max(...visibleData.map(c => c.high));
+      const priceRange = maxPrice - minPrice;
+      
       const lineConfigs = [
         { level: levels.lml, class: 'lml', label: 'L.M.L' },
         { level: levels.lmh, class: 'lmh', label: 'L.M.H' },
@@ -325,19 +344,19 @@
       ];
       
       lineConfigs.forEach(config => {
-        const line = document.createElement('div');
-        line.className = `level-line ${config.class}`;
-        line.style.position = 'absolute';
-        line.style.left = '0';
-        line.style.right = '0';
-        line.style.zIndex = '100';
+        // Calculate Y position based on price level relative to visible range
+        const pricePosition = (config.level - minPrice) / priceRange;
+        const y = rect.height * (1 - pricePosition); // Invert Y axis (0 is top)
         
-        // Position the line at the correct price level
-        const priceScale = state.chart.priceScale('right');
-        const y = priceScale.priceToCoordinate(config.level);
-        
-        if (y !== null && !isNaN(y)) {
+        if (y >= 0 && y <= rect.height) {
+          const line = document.createElement('div');
+          line.className = `level-line ${config.class}`;
+          line.style.position = 'absolute';
+          line.style.left = '0';
+          line.style.right = '0';
           line.style.top = `${y}px`;
+          line.style.zIndex = '100';
+          
           chartContainer.appendChild(line);
           state.levelLines.push(line);
         }
