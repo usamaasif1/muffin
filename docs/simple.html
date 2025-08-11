@@ -172,6 +172,10 @@
 
     // Compute monthly levels from existing candlestick data
     function computeMonthlyLevelsFromCandles(candles) {
+      console.log('🔍 DEBUG: computeMonthlyLevelsFromCandles called with:', candles.length, 'candles');
+      console.log('🔍 DEBUG: First few candles:', candles.slice(0, 3));
+      console.log('🔍 DEBUG: Last few candles:', candles.slice(-3));
+      
       if (!candles || candles.length === 0) return null;
       
       const { lastMonth, prevMonth } = getCompletedMonths();
@@ -269,6 +273,12 @@
       const lastMonth = new Date(nyTime.getFullYear(), nyTime.getMonth() - 1, 1);
       const prevMonth = new Date(nyTime.getFullYear(), nyTime.getMonth() - 2, 1);
       
+      console.log('🔍 DEBUG: getCompletedMonths returning:', {
+        lastMonth: lastMonth.toISOString().slice(0, 7),
+        prevMonth: prevMonth.toISOString().slice(0, 7),
+        currentTime: nyTime.toISOString()
+      });
+      
       return { lastMonth, prevMonth };
     }
 
@@ -317,6 +327,15 @@
     }
 
     function drawLevelLines(levels) {
+      console.log('🔍 DEBUG: drawLevelLines called with levels:', levels);
+      console.log('🔍 DEBUG: Levels object keys:', Object.keys(levels));
+      console.log('🔍 DEBUG: Individual level values:', {
+        lml: levels.lml,
+        lmh: levels.lmh,
+        ppml: levels.ppml,
+        ppmh: levels.ppmh
+      });
+      
       if (!state.chart || !levels) return;
       
       clearLevelLines();
@@ -421,6 +440,14 @@
     }
 
     function updateLevelsPanel(levels, source = 'monthly') {
+      console.log('🔍 DEBUG: updateLevelsPanel called with levels:', levels);
+      console.log('🔍 DEBUG: Panel values being set:', {
+        lml: levels.lml,
+        lmh: levels.lmh,
+        ppml: levels.ppml,
+        ppmh: levels.ppmh
+      });
+      
       if (!levels) {
         document.getElementById('levelsPanel').style.display = 'none';
         return;
@@ -467,9 +494,16 @@
         // Compute monthly levels from existing candlestick data
         const levels = computeMonthlyLevelsFromCandles(seriesData);
         
+        console.log('🔍 DEBUG: Levels computed from candles:', levels);
+        
         if (levels) {
           state.monthlyLevels = levels;
+          console.log('🔍 DEBUG: Levels stored in state:', state.monthlyLevels);
+          
           updateLevelsPanel(levels, 'chart');
+          console.log('🔍 DEBUG: Levels panel updated with:', levels);
+          
+          console.log('🔍 DEBUG: About to call drawLevelLines with:', levels);
           drawLevelLines(levels);
           return;
         } else {
