@@ -93,7 +93,7 @@
         <div id="tabBar">
           <!-- Monthly tab: label removed per requirement (kept as icon-only for space) -->
           <button class="tab-btn active" data-tab="monthly" aria-label="Monthly Levels"></button>
-          <button class="tab-btn" data-tab="pm" aria-label="Post Market Strategy">Post Market</button>
+          <button class="tab-btn" data-tab="alerts" aria-label="Alerts">Alerts</button>
         </div>
         <div id="tabContent">
           <div id="levelsPanel" class="tab-panel" data-tab="monthly" style="display:none;">
@@ -115,7 +115,11 @@
             </div>
             <button id="retryLevels" style="margin-top: 12px; width: 100%; padding: 6px; background: #374151; border: 1px solid #4b5563; color: #e5e7eb; border-radius: 4px; cursor: pointer; font-size: 12px; display: none;">Retry</button>
           </div>
-          <!-- PM panel removed -->
+          <!-- Alerts panel -->
+          <div id="alertsPanel" class="tab-panel" data-tab="alerts" style="display:none;">
+            <div class="panel-title" style="margin-top:6px;">Alerts</div>
+            <div id="alertsList"></div>
+          </div>
         </div>
       </aside>
     </main>
@@ -569,6 +573,27 @@
       const list = Array.isArray(state.watch) ? state.watch.map(s => (typeof s === 'string' ? s : (s && s.symbol) || s)) : [];
       return list.includes(symbol.toUpperCase());
     }
+    function renderAlerts(items) {
+      const box = document.getElementById('alertsList'); if (!box) return;
+      box.innerHTML = '';
+      items.forEach(it => {
+        const row = document.createElement('div'); row.className = 'pm-item';
+        row.innerHTML = `<div><b>${it.symbol}</b></div>
+          <div>Level: <span class="mono">${it.level}</span></div>
+          <div>Time: <span class="mono">${new Date(it.timeSec*1000).toLocaleTimeString('en-US',{hour12:false})} NY</span></div>`;
+        box.appendChild(row);
+      });
+    }
+    function activateAlertsTab() {
+      const mBtn = document.querySelector('.tab-btn[data-tab="monthly"]');
+      const aBtn = document.querySelector('.tab-btn[data-tab="alerts"]');
+      const levels = document.getElementById('levelsPanel');
+      const alerts = document.getElementById('alertsPanel');
+      if (aBtn) aBtn.classList.add('active');
+      if (mBtn) mBtn.classList.remove('active');
+      if (levels) levels.style.display = 'none';
+      if (alerts) alerts.style.display = 'block';
+    }
     async function applyPmHighlights(symbol) {
       if (!state || !state.series) return;
       if (!isUserProvided(symbol)) return; // only for user-provided tickers
@@ -586,6 +611,31 @@
         return pt;
       });
       setSeriesDataWithIndex(next);
+      // Build alerts for candles that are orange and cross any key level
+      const alerts = [];
+      const lv = state.monthlyLevels || null;
+      if (lv) {
+        const levels = [
+          { key: 'L.M.L', value: lv.lml },
+          { key: 'L.M.H', value: lv.lmh },
+          { key: 'P.P.M.L', value: lv.ppml },
+          { key: 'P.P.M.H', value: lv.ppmh },
+        ].filter(L => L.value != null);
+        for (const pt of next) {
+          const isOrange = pt && pt.color === orange;
+          if (!isOrange) continue;
+          for (const L of levels) {
+            if (typeof pt.high === 'number' && pt.high >= L.value) {
+              alerts.push({ symbol: state.symbol, level: L.key, timeSec: pt.time });
+              break;
+            }
+          }
+        }
+      }
+      if (alerts.length) {
+        renderAlerts(alerts);
+        activateAlertsTab();
+      }
     }
 
     async function loadMonthlyLevels(symbol) {
