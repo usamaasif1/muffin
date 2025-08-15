@@ -28,6 +28,26 @@ def _is_github_repo_root(url: str) -> bool:
     return len(parts) == 2  # owner/repo
 
 
+# New: support GitHub "tree" URLs such as
+# https://github.com/{owner}/{repo}/tree/{ref}[/path]
+# This allows targeting a non-default branch/ref explicitly.
+def _is_github_tree_url(url: str) -> bool:
+    return url.startswith("https://github.com/") and "/tree/" in url
+
+
+def _parse_tree_url(url: str) -> Tuple[str, str, str, str]:
+    # Returns (owner, repo, ref, path)
+    prefix = "https://github.com/"
+    remainder = url[len(prefix):].strip("/")
+    parts = remainder.split("/")
+    # Expect: owner/repo/tree/ref[/path...]
+    if len(parts) < 4 or parts[2] != "tree":
+        raise ValueError("Invalid GitHub tree URL format")
+    owner, repo, _, ref = parts[:4]
+    path = "/".join(parts[4:])  # may be empty
+    return owner, repo, ref, path
+
+
 def _split_repo_root(url: str) -> Tuple[str, str]:
     remainder = url[len("https://github.com/") :].strip("/")
     owner, repo = remainder.split("/")
@@ -157,6 +177,20 @@ def read_github_file(url: str, token: Optional[str] = None) -> GithubFileResult:
     """
     if not url:
         raise ValueError("url is required")
+
+    # New: Handle GitHub tree URLs (explicit branch/ref and optional path)
+    if _is_github_tree_url(url):
+        owner, repo, ref, path = _parse_tree_url(url)
+        # If no file is specified (root or directory), default to README.md
+        target_path = path.strip("/")
+        if not target_path or target_path.endswith("/") or target_path == "":
+            target_path = (target_path.rstrip("/") + "/README.md").lstrip("/")
+        # Build an equivalent blob URL to reuse existing helpers
+        blob_url = f"https://github.com/{owner}/{repo}/blob/{ref}/{target_path}"
+        if token:
+            return fetch_via_github_api(url=blob_url, token=token)
+        raw = _convert_blob_to_raw(blob_url) or blob_url
+        return fetch_public_raw(raw)
 
     # Handle repository root by targeting README.md
     if _is_github_repo_root(url):
