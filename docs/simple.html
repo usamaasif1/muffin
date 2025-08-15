@@ -161,7 +161,8 @@
       levelLines: [],
       timeToBar: null, // New: to quickly find bars by time
       seenAlerts: new Set(),
-      seenPm: new Set()
+      seenPm: new Set(),
+      pmWatchlist: []
     };
 
     function apiUrl(endpoint, query) {
@@ -606,6 +607,26 @@
         box.appendChild(row);
       });
     }
+    function savePmWatchlist() {
+      try { localStorage.setItem('pm.watchlist', JSON.stringify(state.pmWatchlist)); } catch {}
+    }
+    function loadPmWatchlist() {
+      try {
+        const raw = localStorage.getItem('pm.watchlist');
+        const arr = raw ? JSON.parse(raw) : [];
+        state.pmWatchlist = Array.isArray(arr) ? arr : [];
+      } catch { state.pmWatchlist = []; }
+      // seed seen set
+      state.pmWatchlist.forEach(it => state.seenPm.add(`${it.symbol}|${it.timeSec}`));
+      renderPmWatchlist(state.pmWatchlist);
+    }
+    function addPmWatchItem(item) {
+      const key = `${item.symbol}|${item.timeSec}`;
+      if (state.seenPm.has(key)) return; // already recorded
+      state.pmWatchlist.push(item);
+      savePmWatchlist();
+      renderPmWatchlist([item]);
+    }
     function activateAlertsTab() {
       const mBtn = document.querySelector('.tab-btn[data-tab="monthly"]');
       const aBtn = document.querySelector('.tab-btn[data-tab="alerts"]');
@@ -665,18 +686,14 @@
         activateAlertsTab();
       }
       // Build Post-Market Watchlist for orange bars between 16:00–20:00 NY
-      const pmItems = [];
       for (const pt of next) {
         const isOrange = pt && pt.color === orange;
         const isLastDay = nyDateStr((pt.time || 0) * 1000) === lastDate;
         if (!isOrange || !isLastDay) continue;
         const { hh } = nyParts((pt.time || 0) * 1000);
         if (hh >= 16 && hh < 20) {
-          pmItems.push({ symbol: state.symbol, timeSec: pt.time });
+          addPmWatchItem({ symbol: state.symbol, timeSec: pt.time });
         }
-      }
-      if (pmItems.length) {
-        renderPmWatchlist(pmItems);
       }
     }
 
@@ -839,11 +856,9 @@
         state.symbol = symbol.toUpperCase();
         title.textContent = `${state.symbol} • ${state.timespan}`;
         renderWatch();
-        // reset alert/watchlist UI and seen sets on new symbol
+        // reset Alerts UI and seen set on new symbol (keep PM watchlist persistent)
         const al = document.getElementById('alertsList'); if (al) al.innerHTML = '';
-        const pw = document.getElementById('pmWatchList'); if (pw) pw.innerHTML = '';
         state.seenAlerts = new Set();
-        state.seenPm = new Set();
         
         // Load monthly levels for the new symbol (only if symbol changed or no levels exist)
         if (state.lastComputedSymbol !== symbol || !state.monthlyLevels) {
@@ -996,6 +1011,8 @@
 
       renderWatch();
       loadSymbol('AAPL');
+      // Load persisted Post-Market watchlist once
+      loadPmWatchlist();
       
       // Add chart resize handler
       window.addEventListener('resize', () => {
