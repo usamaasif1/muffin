@@ -591,6 +591,17 @@
         box.appendChild(row);
       });
     }
+    function activatePmTab() {
+      // Switch right-panel tab to PM so alerts are visible
+      const monthlyBtn = document.querySelector('.tab-btn[data-tab="monthly"]');
+      const pmBtn = document.querySelector('.tab-btn[data-tab="pm"]');
+      const levels = document.getElementById('levelsPanel');
+      const pmPanel = document.getElementById('pmPanel');
+      if (pmBtn) pmBtn.classList.add('active');
+      if (monthlyBtn) monthlyBtn.classList.remove('active');
+      if (levels) levels.style.display = 'none';
+      if (pmPanel) pmPanel.style.display = 'block';
+    }
     function renderPmWatchlist() {
       const box = document.getElementById('pmWatchList'); if (!box) return;
       box.innerHTML = '';
@@ -672,6 +683,7 @@
       pmStore.alertedSet.add(key);
       pmStore.alerts.push({ symbol, regularClose, currentPrice: trigger.close, pct: (trigger.close - regularClose) / regularClose, timeSec: trigger.time });
       renderPmAlerts();
+      activatePmTab();
       addAlertMarkerIfActiveSymbol(symbol, trigger.time);
     }
     // Detect Stage 2 for a single symbol
