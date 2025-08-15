@@ -504,6 +504,23 @@
       document.getElementById('levelsPanel').style.display = 'block';
     }
 
+    // Series data helpers (global): keep series data indexed by time for fast lookup
+    function setSeriesDataWithIndex(rows) {
+      if (!state || !state.series) return rows || [];
+      state.series.setData(rows || []);
+      const map = new Map();
+      (rows || []).forEach(r => { if (r && typeof r.time === 'number') map.set(r.time, r); });
+      state.timeToBar = map;
+      return rows || [];
+    }
+    function getBarAtTime(timeSec) {
+      if (!state) return null;
+      if (state.timeToBar && state.timeToBar.has(timeSec)) return state.timeToBar.get(timeSec);
+      const data = (state.series && typeof state.series.data === 'function') ? (state.series.data() || []) : [];
+      for (let i=0;i<data.length;i++) if (data[i].time === timeSec) return data[i];
+      return null;
+    }
+
     // ===== Post-Market Step 1: Visual highlight (≥ 17% within 1-hour, 20:00–24:00 NY) =====
     // Utility: New York date/time parts
     function nyParts(ms) {
