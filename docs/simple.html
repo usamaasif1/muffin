@@ -621,7 +621,7 @@
       const key = `${today}|${symbol}`;
       if (pmStore.regularCloseCache[key] != null) return pmStore.regularCloseCache[key];
       try {
-        const bars = await fetchCandlesCustom(symbol, '1m', '2d');
+        const bars = await fetchCandlesCustom(symbol, '1m', '7d');
         const todays = bars.filter(b => nyDateStr(b.t) === today && isRegularHoursNY(b.t));
         if (!todays.length) return null;
         const last = todays.sort((a,b)=>a.t-b.t)[todays.length-1];
@@ -654,7 +654,7 @@
     async function detectPostMarketMoveForSymbol(symbol) {
       const now = Date.now();
       let bars = [];
-      try { bars = await fetchCandlesCustom(symbol, '1m', '2d'); } catch { return; }
+      try { bars = await fetchCandlesCustom(symbol, '1m', '7d'); } catch { return; }
       if (!bars.length) return;
       // Group by NY date to find the latest day with any post-market bars
       const byDate = new Map();
