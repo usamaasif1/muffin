@@ -521,39 +521,26 @@
       const { hh } = nyParts(ms);
       return hh >= 20 && hh < 24; // 20:00 → 24:00
     }
-    // Returns trigger times (seconds) for latest session where any 1-hour window reaches ≥ 17%
+    // Returns trigger times (seconds) where any 1-hour window reaches ≥ 17% (no time-of-day restriction)
     async function findPmTriggers1h(symbol) {
       try {
-        const bars = await fetchCandlesCustom(symbol, '1m', '2d'); // small lookback, includes latest
+        const bars = await fetchCandlesCustom(symbol, '1m', '7d');
         if (!bars || !bars.length) return [];
-        // Group by NY date
-        const byDate = new Map();
-        for (const b of bars) {
-          const d = nyDateStr(b.t);
-          if (!byDate.has(d)) byDate.set(d, []);
-          byDate.get(d).push(b);
-        }
-        const dates = Array.from(byDate.keys()).sort();
-        // Find latest date having any 20:00–24:00 bars
-        let pmBars = [];
-        for (let i = dates.length - 1; i >= 0; i--) {
-          const dayBars = (byDate.get(dates[i]) || []).filter(b => isWithinPmHourNY(b.t)).sort((a,b)=>a.t-b.t);
-          if (dayBars.length) { pmBars = dayBars; break; }
-        }
-        if (!pmBars.length) return [];
-        // Build hourly windows starting at :00 (20,21,22,23)
+        const sorted = bars.slice().sort((a,b)=>a.t-b.t); // sort by ms ascending
         const triggers = [];
-        const windows = [20,21,22,23];
-        for (const hour of windows) {
-          const winBars = pmBars.filter(b => nyParts(b.t).hh === hour);
-          if (!winBars.length) continue;
-          const base = winBars[0];
-          if (!base || base.open === 0) continue;
-          const threshold = base.open * 1.17;
-          const hit = winBars.find(b => b.high >= threshold);
-          if (hit) triggers.push(hit.time);
+        let baseIdx = 0;
+        for (let i = 0; i < sorted.length; i++) {
+          const end = sorted[i];
+          const cutoffMs = end.t - 3600 * 1000; // 1 hour earlier
+          while (baseIdx < i - 1 && sorted[baseIdx + 1].t <= cutoffMs) baseIdx++;
+          const base = sorted[baseIdx];
+          if (!base || base.close == null || base.close === 0) continue;
+          const change = (Math.max(end.high ?? end.close, end.close) - base.close) / base.close;
+          if (change >= 0.17) {
+            triggers.push(end.time); // seconds
+          }
         }
-        return triggers;
+        return Array.from(new Set(triggers));
       } catch { return []; }
     }
     function isUserProvided(symbol) {
