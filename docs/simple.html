@@ -67,6 +67,10 @@
     .slider:before { content:""; position:absolute; height:18px; width:18px; left:3px; top:3px; background:white; border-radius:50%; transition:.2s; }
     .toggle input:checked + .slider { background:#10b981; }
     .toggle input:checked + .slider:before { transform: translateX(20px); }
+    .panel-title { color: #94a3b8; font-size: 12px; margin: 6px 0; }
+    #pmAlertsList, #pmWatchList { display: grid; gap: 6px; }
+    .pm-item { border: 1px solid #374151; border-radius: 6px; padding: 8px; background: #0a0f20; font-size: 12px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas; }
   </style>
 </head>
 <body>
@@ -137,6 +141,12 @@
               <div class="strategy-row"><span>Signal:</span><span id="pmSignalValue">No Signal</span></div>
               <div class="hint">Toggle Off disables strategy logic and drawing.</div>
             </div>
+
+            <div class="panel-title" style="margin-top:10px;">Post-Market Alerts</div>
+            <div id="pmAlertsList"></div>
+
+            <div class="panel-title" style="margin-top:10px;">Post-Market Watchlist</div>
+            <div id="pmWatchList"></div>
           </div>
         </div>
       </aside>
@@ -525,6 +535,204 @@
       document.getElementById('levelsPanel').style.display = 'block';
     }
 
+    // ===== Post-Market Detection Flow =====
+    const pmState = { enabled: false, targetPct: 20, timer: null, lastResetDate: null };
+    const pmStore = {
+      alerts: [], // {symbol, regularClose, currentPrice, pct, timeSec}
+      watchlist: [], // {symbol, level, closePrice, timeSec}
+      alertedSet: new Set(), // key: nyDate|symbol
+      watchSet: new Set(), // key: nyDate|symbol|level
+      regularCloseCache: {}, // key: nyDate|symbol -> price
+    };
+    let pmMarkers = []; // chart markers for current symbol only
+
+    function nyParts(ms) {
+      const d = new Date(ms);
+      const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false });
+      const parts = Object.fromEntries(fmt.formatToParts(d).map(p=>[p.type,p.value]));
+      const yyyy = parseInt(parts.year), MM = parseInt(parts.month), dd = parseInt(parts.day), hh = parseInt(parts.hour), mm = parseInt(parts.minute);
+      return { yyyy, MM, dd, hh, mm };
+    }
+    function nyDateStr(ms) {
+      const { yyyy, MM, dd } = nyParts(ms);
+      return `${yyyy}-${String(MM).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
+    }
+    function isRegularHoursNY(ms) {
+      const { hh, mm } = nyParts(ms);
+      const mins = hh*60 + mm;
+      return mins >= (9*60+30) && mins <= (16*60); // 09:30 - 16:00
+    }
+    function isPostMarketNY(ms) {
+      const { hh, mm } = nyParts(ms);
+      const mins = hh*60 + mm;
+      return mins > (16*60) && mins <= (20*60); // 16:01 - 20:00
+    }
+    function shouldDailyResetNow() {
+      const now = Date.now();
+      const date = nyDateStr(now);
+      const { hh, mm } = nyParts(now);
+      const afterClose = (hh*60+mm) >= (20*60+5); // after 20:05 NY
+      return afterClose && pmState.lastResetDate !== date;
+    }
+    function resetDailyPmState() {
+      pmStore.alerts = [];
+      pmStore.watchlist = [];
+      pmStore.alertedSet.clear();
+      pmStore.watchSet.clear();
+      pmStore.regularCloseCache = {};
+      pmMarkers = [];
+      updateMarkers();
+      renderPmAlerts();
+      renderPmWatchlist();
+      pmState.lastResetDate = nyDateStr(Date.now());
+    }
+    function updateMarkers() {
+      try { if (state?.series) state.series.setMarkers(pmMarkers); } catch {}
+    }
+    function renderPmAlerts() {
+      const box = document.getElementById('pmAlertsList'); if (!box) return;
+      box.innerHTML = '';
+      pmStore.alerts.slice().reverse().forEach(a => {
+        const row = document.createElement('div'); row.className = 'pm-item';
+        const pct = (a.pct*100).toFixed(1) + '%';
+        const t = new Date(a.timeSec*1000);
+        const tm = new Intl.DateTimeFormat('en-US', { timeZone:'America/New_York', hour:'2-digit', minute:'2-digit', hour12:false }).format(t);
+        row.innerHTML = `<div><b>${a.symbol}</b></div>
+          <div>Regular Close: <span class="mono">$${a.regularClose.toFixed(2)}</span></div>
+          <div>Current: <span class="mono">$${a.currentPrice.toFixed(2)}</span> • Change: <span class="mono">${pct}</span></div>
+          <div class="mono" style="color:#94a3b8;">${tm} NY</div>`;
+        box.appendChild(row);
+      });
+    }
+    function renderPmWatchlist() {
+      const box = document.getElementById('pmWatchList'); if (!box) return;
+      box.innerHTML = '';
+      pmStore.watchlist.slice().reverse().forEach(w => {
+        const t = new Date(w.timeSec*1000);
+        const tm = new Intl.DateTimeFormat('en-US', { timeZone:'America/New_York', hour:'2-digit', minute:'2-digit', hour12:false }).format(t);
+        const row = document.createElement('div'); row.className = 'pm-item';
+        row.innerHTML = `<div><b>${w.symbol}</b></div>
+          <div>Level: <span class="mono">${w.level}</span></div>
+          <div>Close: <span class="mono">$${w.closePrice.toFixed(2)}</span></div>
+          <div class="mono" style="color:#94a3b8;">${tm} NY</div>`;
+        box.appendChild(row);
+      });
+    }
+    async function getTodayRegularClose(symbol) {
+      const today = nyDateStr(Date.now());
+      const key = `${today}|${symbol}`;
+      if (pmStore.regularCloseCache[key] != null) return pmStore.regularCloseCache[key];
+      try {
+        const bars = await fetchCandlesCustom(symbol, '1m', '2d');
+        const todays = bars.filter(b => nyDateStr(b.t) === today && isRegularHoursNY(b.t));
+        if (!todays.length) return null;
+        const last = todays.sort((a,b)=>a.t-b.t)[todays.length-1];
+        pmStore.regularCloseCache[key] = last.close;
+        return last.close;
+      } catch { return null; }
+    }
+    function addAlertMarkerIfActiveSymbol(symbol, barTimeSec) {
+      if (symbol !== state.symbol || !state.series) return;
+      pmMarkers.push({ time: barTimeSec, position: 'aboveBar', color: '#10b981', shape: 'arrowUp', text: 'PM +17%' });
+      updateMarkers();
+    }
+    function addWatchlistMarkerIfActiveSymbol(symbol, barTimeSec) {
+      if (symbol !== state.symbol || !state.series) return;
+      pmMarkers.push({ time: barTimeSec, position: 'aboveBar', color: '#38bdf8', shape: 'circle', text: 'Added to PM Watchlist' });
+      updateMarkers();
+    }
+    // Stage 1 – Post-Market Alert
+    async function detectPostMarketMove(symbol) {
+      const now = Date.now();
+      if (!isPostMarketNY(now)) return; // only monitor post-market
+      const regularClose = await getTodayRegularClose(symbol);
+      if (regularClose == null) return;
+      let bars = [];
+      try { bars = await fetchCandlesCustom(symbol, '1m', '2d'); } catch { return; }
+      const today = nyDateStr(now);
+      const pmBars = bars.filter(b => nyDateStr(b.t) === today && isPostMarketNY(b.t)).sort((a,b)=>a.t-b.t);
+      if (!pmBars.length) return;
+      const lastClosed = pmBars[pmBars.length-1];
+      const change = (lastClosed.close - regularClose) / regularClose;
+      const key = `${today}|${symbol}`;
+      if (change >= 0.17 && !pmStore.alertedSet.has(key)) {
+        pmStore.alertedSet.add(key);
+        pmStore.alerts.push({ symbol, regularClose, currentPrice: lastClosed.close, pct: change, timeSec: lastClosed.time });
+        renderPmAlerts();
+        addAlertMarkerIfActiveSymbol(symbol, lastClosed.time);
+      }
+    }
+    // Stage 2 – Level Confirmation & Watchlist
+    async function checkLevelConfirmation(symbol) {
+      const now = Date.now();
+      if (!isPostMarketNY(now)) return;
+      const today = nyDateStr(now);
+      if (!pmStore.alertedSet.has(`${today}|${symbol}`)) return; // only after alert
+
+      // Resolve key levels for symbol
+      let lv = null;
+      if (symbol === state.symbol && state.monthlyLevels) {
+        lv = state.monthlyLevels;
+      } else {
+        // fetch daily 90d and compute monthly levels
+        try {
+          const resp = await fetch(`/api/candles?symbol=${encodeURIComponent(symbol)}&timespan=day&window=90d`);
+          const data = await resp.json();
+          const daily = (data.candles||[]).map(c => ({ t: c.t, high: c.h, low: c.l }));
+          lv = computeMonthlyLevelsFromDaily(daily);
+        } catch { lv = null; }
+      }
+      if (!lv) return;
+
+      const bars = await fetchCandlesCustom(symbol, '1m', '2d');
+      const pmBars = bars.filter(b => nyDateStr(b.t) === today && isPostMarketNY(b.t)).sort((a,b)=>a.t-b.t);
+      if (!pmBars.length) return;
+
+      const levels = [
+        { key: 'L.M.H', value: lv.lmh },
+        { key: 'L.M.L', value: lv.lml },
+        { key: 'P.P.M.H', value: lv.ppmh },
+        { key: 'P.P.M.L', value: lv.ppml },
+      ].filter(x => x.value != null);
+
+      for (const L of levels) {
+        const watchKey = `${today}|${symbol}|${L.key}`;
+        if (pmStore.watchSet.has(watchKey)) continue;
+        // find crossing time: first bar whose high >= level
+        const crossed = pmBars.find(b => b.high >= L.value);
+        if (!crossed) continue;
+        const crossTime = crossed.time;
+        const limitSec = crossTime + 3600; // 1 hour window
+        // find a confirmation close above level within 1 hour
+        const confirm = pmBars.find(b => b.time > crossTime && b.time <= limitSec && b.close >= L.value);
+        if (confirm) {
+          pmStore.watchSet.add(watchKey);
+          pmStore.watchlist.push({ symbol, level: L.key, closePrice: confirm.close, timeSec: confirm.time });
+          renderPmWatchlist();
+          addWatchlistMarkerIfActiveSymbol(symbol, confirm.time);
+        }
+      }
+    }
+
+    async function pmMonitorTick() {
+      if (!pmState.enabled) return;
+      if (shouldDailyResetNow()) resetDailyPmState();
+      const symbols = Array.from(new Set([state.symbol, ...(state.watch||[])]).values()).filter(Boolean);
+      for (const sym of symbols) {
+        await detectPostMarketMove(sym);
+        await checkLevelConfirmation(sym);
+      }
+    }
+    function startPmMonitor() {
+      if (pmState.timer) clearInterval(pmState.timer);
+      pmState.timer = setInterval(pmMonitorTick, 60000); // every 60s
+      pmMonitorTick();
+    }
+    function stopPmMonitor() {
+      if (pmState.timer) { clearInterval(pmState.timer); pmState.timer = null; }
+      pmMarkers = []; updateMarkers();
+    }
+
     async function loadMonthlyLevels(symbol) {
       try {
         // Wait for chart to be ready
@@ -725,7 +933,6 @@
     });
 
     // --- Post Market Strategy (simple evaluation) ---
-    const pmState = { enabled: false, targetPct: 20, lastSignal: null };
     function isPostMarket(ms) {
       const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute:'2-digit', hour12:false });
       const [hh, mm] = fmt.format(new Date(ms)).split(':').map(Number);
@@ -792,10 +999,8 @@
       if (pmToggle) {
         pmToggle.addEventListener('change', () => {
           pmState.enabled = !!pmToggle.checked;
-          if (pmState.enabled) evaluatePostMarketStrategy();
-          else {
-            document.getElementById('pmSignalValue').textContent = 'No Signal';
-          }
+          if (pmState.enabled) { evaluatePostMarketStrategy(); startPmMonitor(); }
+          else { document.getElementById('pmSignalValue').textContent = 'No Signal'; stopPmMonitor(); }
         });
       }
  
@@ -808,7 +1013,7 @@
           console.log('🔍 DEBUG: Redrawing levels for window resize');
           drawLevelLines(state.monthlyLevels);
         }
-        if (pmState.enabled) evaluatePostMarketStrategy();
+        if (pmState.enabled) { evaluatePostMarketStrategy(); }
       });
       
       // Add retry button handler
