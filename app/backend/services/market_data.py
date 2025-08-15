@@ -208,7 +208,7 @@ def _fetch_candles_polygon(symbol: str, timespan: Timespan, window: str, key: st
 def _fetch_candles_yahoo(symbol: str, timespan: Timespan, window: str) -> List[Candle]:
     interval, rng = _yahoo_interval_and_range(timespan, window)
     url = (
-        f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={interval}&range={rng}"
+        f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={interval}&range={rng}&includePrePost=true"
     )
     resp = requests.get(url, timeout=30)
     resp.raise_for_status()
