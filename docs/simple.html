@@ -601,10 +601,14 @@
       if (state.timespan !== '1h') return;
       const data = state.series.data() || [];
       if (!data.length) return;
+      // Limit scope to last active NY day only
+      const lastBar = data[data.length - 1];
+      const lastDate = nyDateStr((lastBar.time || 0) * 1000);
       const orange = '#f59e0b';
       const next = data.map(pt => {
+        const isLastDay = nyDateStr((pt.time || 0) * 1000) === lastDate;
         const o = pt.open, h = pt.high;
-        const hit = (typeof o === 'number' && o > 0 && typeof h === 'number') ? ((h - o) / o) >= 0.17 : false;
+        const hit = isLastDay && (typeof o === 'number' && o > 0 && typeof h === 'number') ? ((h - o) / o) >= 0.17 : false;
         if (hit) {
           return { time: pt.time, open: pt.open, high: pt.high, low: pt.low, close: pt.close, color: orange, wickColor: orange, borderColor: orange };
         }
@@ -623,7 +627,9 @@
         ].filter(L => L.value != null);
         for (const pt of next) {
           const isOrange = pt && pt.color === orange;
+          const isLastDay = nyDateStr((pt.time || 0) * 1000) === lastDate;
           if (!isOrange) continue;
+          if (!isLastDay) continue;
           for (const L of levels) {
             if (typeof pt.high === 'number' && pt.high >= L.value) {
               alerts.push({ symbol: state.symbol, level: L.key, timeSec: pt.time });
