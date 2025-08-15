@@ -624,7 +624,7 @@
           { key: 'L.M.H', value: lv.lmh },
           { key: 'P.P.M.L', value: lv.ppml },
           { key: 'P.P.M.H', value: lv.ppmh },
-        ].filter(L => L.value != null);
+        ].filter(L => L.value != null).sort((a,b) => Number(b.value) - Number(a.value));
         for (const pt of next) {
           const isOrange = pt && pt.color === orange;
           const isLastDay = nyDateStr((pt.time || 0) * 1000) === lastDate;
