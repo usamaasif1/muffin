@@ -643,7 +643,18 @@
     }
     function addAlertMarkerIfActiveSymbol(symbol, barTimeSec) {
       if (symbol !== state.symbol || !state.series) return;
-      pmMarkers.push({ time: barTimeSec, position: 'aboveBar', color: '#10b981', shape: 'arrowUp', text: 'PM +17%' });
+      // Map to nearest visible series time so the marker shows even if TF != 1m
+      const data = state.series.data() || [];
+      let mapped = barTimeSec;
+      if (data.length) {
+        let best = data[0].time, bestDiff = Math.abs(data[0].time - barTimeSec);
+        for (let i=1;i<data.length;i++) {
+          const d = Math.abs(data[i].time - barTimeSec);
+          if (d < bestDiff) { best = data[i].time; bestDiff = d; }
+        }
+        mapped = best;
+      }
+      pmMarkers.push({ time: mapped, position: 'aboveBar', color: '#10b981', shape: 'arrowUp', text: 'PM +17%' });
       updateMarkers();
     }
     function addWatchlistMarkerIfActiveSymbol(symbol, barTimeSec) {
@@ -651,26 +662,40 @@
       pmMarkers.push({ time: barTimeSec, position: 'aboveBar', color: '#38bdf8', shape: 'circle', text: 'Added to PM Watchlist' });
       updateMarkers();
     }
-    // Detect Stage 1 for a single symbol
+    // Detect Stage 1 for a single symbol (latest or current post-market)
     async function detectPostMarketMoveForSymbol(symbol) {
       const now = Date.now();
-      if (!isPostMarketNY(now)) return; // only monitor post-market
-      const regularClose = await getTodayRegularClose(symbol);
-      if (regularClose == null) return;
       let bars = [];
       try { bars = await fetchCandlesCustom(symbol, '1m', '2d'); } catch { return; }
-      const today = nyDateStr(now);
-      const pmBars = bars.filter(b => nyDateStr(b.t) === today && isPostMarketNY(b.t)).sort((a,b)=>a.t-b.t);
-      if (!pmBars.length) return;
-      const lastClosed = pmBars[pmBars.length-1];
-      const change = (lastClosed.close - regularClose) / regularClose;
-      const key = `${today}|${symbol}`;
-      if (change >= 0.17 && !pmStore.alertedSet.has(key)) {
-        pmStore.alertedSet.add(key);
-        pmStore.alerts.push({ symbol, regularClose, currentPrice: lastClosed.close, pct: change, timeSec: lastClosed.time });
-        renderPmAlerts();
-        addAlertMarkerIfActiveSymbol(symbol, lastClosed.time);
+      if (!bars.length) return;
+      // Group by NY date to find the latest day with any post-market bars
+      const byDate = new Map();
+      for (const b of bars) {
+        const d = nyDateStr(b.t);
+        if (!byDate.has(d)) byDate.set(d, []);
+        byDate.get(d).push(b);
       }
+      const dates = Array.from(byDate.keys()).sort();
+      let targetDate = null, pmBars = [];
+      for (let i=dates.length-1; i>=0; i--) {
+        const dayBars = byDate.get(dates[i]);
+        const pm = dayBars.filter(x => isPostMarketNY(x.t));
+        if (pm.length) { targetDate = dates[i]; pmBars = pm.sort((a,b)=>a.t-b.t); break; }
+      }
+      if (!targetDate || !pmBars.length) return;
+      // Regular close is the last regular-hours candle of the same targetDate
+      const regulars = (byDate.get(targetDate)||[]).filter(x => isRegularHoursNY(x.t)).sort((a,b)=>a.t-b.t);
+      if (!regulars.length) return;
+      const regularClose = regulars[regulars.length-1].close;
+      // Find first post-market bar where gain >= 17%
+      const trigger = pmBars.find(b => ((b.close - regularClose) / regularClose) >= 0.17);
+      if (!trigger) return;
+      const key = `${targetDate}|${symbol}`;
+      if (pmStore.alertedSet.has(key)) return;
+      pmStore.alertedSet.add(key);
+      pmStore.alerts.push({ symbol, regularClose, currentPrice: trigger.close, pct: (trigger.close - regularClose) / regularClose, timeSec: trigger.time });
+      renderPmAlerts();
+      addAlertMarkerIfActiveSymbol(symbol, trigger.time);
     }
     // Detect Stage 2 for a single symbol
     async function checkLevelConfirmationForSymbol(symbol) {
@@ -1080,6 +1105,24 @@
           loadMonthlyLevels(state.symbol);
         }
       });
+
+      // Stage 1: Hook into regular search events to run detection immediately
+      if (search && goBtn) {
+        goBtn.addEventListener('click', async () => {
+          const s = (search.value||'').trim();
+          if (!s) return;
+          await loadSymbol(s);
+          await detectPostMarketMoveForSymbol(s.toUpperCase());
+        });
+        search.addEventListener('keydown', async (e) => {
+          if (e.key === 'Enter') {
+            const s = (search.value||'').trim();
+            if (!s) return;
+            await loadSymbol(s);
+            await detectPostMarketMoveForSymbol(s.toUpperCase());
+          }
+        });
+      }
     });
   })();
   </script>
