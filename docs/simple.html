@@ -596,7 +596,7 @@
     }
     async function applyPmHighlights(symbol) {
       if (!state || !state.series) return;
-      if (!isUserProvided(symbol)) return; // only for user-provided tickers
+      // Apply for the active symbol (no user-list guard)
       // Only affect 1-hour timeframe candles as requested
       if (state.timespan !== '1h') return;
       const data = state.series.data() || [];
@@ -807,16 +807,19 @@
         // Load monthly levels for the new symbol (only if symbol changed or no levels exist)
         if (state.lastComputedSymbol !== symbol || !state.monthlyLevels) {
           await loadMonthlyLevels(symbol);
-        } else {
-          console.log('🔍 DEBUG: Reusing existing levels for symbol:', symbol);
-          // Redraw existing levels for the new timeframe
-          if (state.monthlyLevels) {
-            drawLevelLines(state.monthlyLevels);
-          }
-        }
+                } else {
+           console.log('🔍 DEBUG: Reusing existing levels for symbol:', symbol);
+           // Redraw existing levels for the new timeframe
+           if (state.monthlyLevels) {
+             drawLevelLines(state.monthlyLevels);
+           }
+         }
 
-        // Evaluate post-market strategy if enabled
-        // if (pmState.enabled) evaluatePostMarketStrategy(); // Removed PM state
+         // Apply highlights/alerts for the new symbol (1h only)
+         await applyPmHighlights(state.symbol)
+ 
+         // Evaluate post-market strategy if enabled
+         // if (pmState.enabled) evaluatePostMarketStrategy(); // Removed PM state
       } catch (e) {
         showError(String(e && e.message ? e.message : e));
       }
