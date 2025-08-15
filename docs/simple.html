@@ -577,10 +577,10 @@
         }
         toHighlight.add(best);
       }
-      const green = '#16a34a';
+      const orange = '#f59e0b';
       const next = data.map(pt => {
         if (toHighlight.has(pt.time)) {
-          return { time: pt.time, open: pt.open, high: pt.high, low: pt.low, close: pt.close, color: green, wickColor: green, borderColor: green };
+          return { time: pt.time, open: pt.open, high: pt.high, low: pt.low, close: pt.close, color: orange, wickColor: orange, borderColor: orange };
         }
         return pt;
       });
