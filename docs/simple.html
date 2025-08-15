@@ -572,23 +572,15 @@
     async function applyPmHighlights(symbol) {
       if (!state || !state.series) return;
       if (!isUserProvided(symbol)) return; // only for user-provided tickers
-      const triggers = await findPmTriggers1h(symbol);
-      if (!triggers.length) return;
-      // Map triggers to nearest visible bar and override its color
+      // Only affect 1-hour timeframe candles as requested
+      if (state.timespan !== '1h') return;
       const data = state.series.data() || [];
       if (!data.length) return;
-      const toHighlight = new Set();
-      for (const t of triggers) {
-        let best = data[0].time, bestDiff = Math.abs(data[0].time - t);
-        for (let i=1;i<data.length;i++) {
-          const d = Math.abs(data[i].time - t);
-          if (d < bestDiff) { best = data[i].time; bestDiff = d; }
-        }
-        toHighlight.add(best);
-      }
       const orange = '#f59e0b';
       const next = data.map(pt => {
-        if (toHighlight.has(pt.time)) {
+        const o = pt.open, h = pt.high;
+        const hit = (typeof o === 'number' && o > 0 && typeof h === 'number') ? ((h - o) / o) >= 0.17 : false;
+        if (hit) {
           return { time: pt.time, open: pt.open, high: pt.high, low: pt.low, close: pt.close, color: orange, wickColor: orange, borderColor: orange };
         }
         return pt;
