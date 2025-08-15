@@ -57,7 +57,7 @@
     .level-line.ppmh { background: #ef4444; }
     /* PM UI removed */
     /* Hover info panel like TradingView */
-    .hover-info { position: absolute; top: 6px; left: 6px; background: rgba(15,23,42,0.9); border: 1px solid #374151; border-radius: 6px; padding: 6px 8px; font-size: 12px; color: #e5e7eb; pointer-events: none; display: none; }
+    .hover-info { position: absolute; top: 6px; left: 6px; background: rgba(15,23,42,0.9); border: 1px solid #374151; border-radius: 6px; padding: 6px 8px; font-size: 12px; color: #e5e7eb; pointer-events: none; display: none; z-index: 2000; }
     .pos { color: #10b981; }
     .neg { color: #ef4444; }
   </style>
@@ -148,7 +148,8 @@
       series: null,
       watch: JSON.parse(localStorage.getItem('simple.watch') || '[]'),
       monthlyLevels: null,
-      levelLines: []
+      levelLines: [],
+      timeToBar: null // New: to quickly find bars by time
     };
 
     function apiUrl(endpoint, query) {
@@ -575,7 +576,7 @@
         }
         return pt;
       });
-      state.series.setData(next);
+      setSeriesDataWithIndex(next);
     }
 
     async function loadMonthlyLevels(symbol) {
@@ -691,9 +692,25 @@
         if (container) container.appendChild(el);
       }
       function fmt(n) { return (n != null && isFinite(n)) ? Number(n).toFixed(2) : '—'; }
+      // Helper: set series data and build time index for quick lookups
+      function setSeriesDataWithIndex(rows) {
+        state.series.setData(rows);
+        const map = new Map();
+        rows.forEach(r => { if (typeof r.time === 'number') map.set(r.time, r); });
+        state.timeToBar = map;
+        return rows;
+      }
+      function getBarAtTime(timeSec) {
+        if (state?.timeToBar && state.timeToBar.has(timeSec)) return state.timeToBar.get(timeSec);
+        const data = state?.series?.data?.() || [];
+        // fallback: linear search
+        for (let i=0;i<data.length;i++) if (data[i].time === timeSec) return data[i];
+        return null;
+      }
       state.chart.subscribeCrosshairMove(param => {
         if (!param || !param.time || !param.point) { el.style.display = 'none'; return; }
-        const sd = (param.seriesData && param.seriesData.get && param.seriesData.get(state.series)) || null;
+        if (typeof param.time !== 'number') { el.style.display = 'none'; return; }
+        const sd = getBarAtTime(param.time);
         if (!sd || typeof sd.open !== 'number') { el.style.display = 'none'; return; }
         const o = sd.open, h = sd.high, l = sd.low, c = sd.close;
         const chg = (o ? ((c - o) / o) * 100 : 0);
@@ -716,7 +733,7 @@
           low: c.low, 
           close: c.close 
         }));
-        state.series.setData(allCandles);
+        setSeriesDataWithIndex(allCandles);
         setupHoverInfoOnce();
         state.symbol = symbol.toUpperCase();
         title.textContent = `${state.symbol} • ${state.timespan}`;
