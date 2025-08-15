@@ -499,34 +499,92 @@
       document.getElementById('levelsPanel').style.display = 'block';
     }
 
-    // PM functionality removed per request
-
-    /* removed ticker input helpers */
-    function parseTickers(input) {
-      return (input || '')
-        .split(',')
-        .map(s => s.trim().toUpperCase())
-        .filter(s => /^[A-Z0-9.\-]+$/.test(s));
+    // ===== Post-Market Step 1: Visual highlight (≥ 17% within 1-hour, 20:00–24:00 NY) =====
+    // Utility: New York date/time parts
+    function nyParts(ms) {
+      const d = new Date(ms);
+      const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false });
+      const parts = Object.fromEntries(fmt.formatToParts(d).map(p=>[p.type,p.value]));
+      return {
+        yyyy: parseInt(parts.year),
+        MM: parseInt(parts.month),
+        dd: parseInt(parts.day),
+        hh: parseInt(parts.hour),
+        mm: parseInt(parts.minute)
+      };
     }
-    function saveTickers(list) {
-      // pmState.tickers = Array.from(new Set(list)); // Removed PM state
-      try { localStorage.setItem('simple.watch', JSON.stringify(list)); } catch {}
-      renderWatch();
+    function nyDateStr(ms) {
+      const { yyyy, MM, dd } = nyParts(ms);
+      return `${yyyy}-${String(MM).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
     }
-    function loadTickers() {
+    function isWithinPmHourNY(ms) {
+      const { hh } = nyParts(ms);
+      return hh >= 20 && hh < 24; // 20:00 → 24:00
+    }
+    // Returns trigger times (seconds) for latest session where any 1-hour window reaches ≥ 17%
+    async function findPmTriggers1h(symbol) {
       try {
-        const raw = localStorage.getItem('simple.watch');
-        const arr = raw ? JSON.parse(raw) : [];
-        state.watch = Array.isArray(arr) ? arr : [];
-      } catch { state.watch = []; }
-      renderWatch();
+        const bars = await fetchCandlesCustom(symbol, '1m', '2d'); // small lookback, includes latest
+        if (!bars || !bars.length) return [];
+        // Group by NY date
+        const byDate = new Map();
+        for (const b of bars) {
+          const d = nyDateStr(b.t);
+          if (!byDate.has(d)) byDate.set(d, []);
+          byDate.get(d).push(b);
+        }
+        const dates = Array.from(byDate.keys()).sort();
+        // Find latest date having any 20:00–24:00 bars
+        let pmBars = [];
+        for (let i = dates.length - 1; i >= 0; i--) {
+          const dayBars = (byDate.get(dates[i]) || []).filter(b => isWithinPmHourNY(b.t)).sort((a,b)=>a.t-b.t);
+          if (dayBars.length) { pmBars = dayBars; break; }
+        }
+        if (!pmBars.length) return [];
+        // Build hourly windows starting at :00 (20,21,22,23)
+        const triggers = [];
+        const windows = [20,21,22,23];
+        for (const hour of windows) {
+          const winBars = pmBars.filter(b => nyParts(b.t).hh === hour);
+          if (!winBars.length) continue;
+          const base = winBars[0];
+          if (!base || base.open === 0) continue;
+          const threshold = base.open * 1.17;
+          const hit = winBars.find(b => b.high >= threshold);
+          if (hit) triggers.push(hit.time);
+        }
+        return triggers;
+      } catch { return []; }
     }
-    function renderTickerChips() {
-      const box = document.getElementById('pmTickerChips'); if (!box) return;
-      box.innerHTML = '';
-      // state.tickers.forEach(t => { // Removed PM state
-      //   const span = document.createElement('span'); span.className = 'chip'; span.textContent = t; box.appendChild(span);
-      // });
+    function isUserProvided(symbol) {
+      const list = Array.isArray(state.watch) ? state.watch.map(s => (typeof s === 'string' ? s : (s && s.symbol) || s)) : [];
+      return list.includes(symbol.toUpperCase());
+    }
+    async function applyPmHighlights(symbol) {
+      if (!state || !state.series) return;
+      if (!isUserProvided(symbol)) return; // only for user-provided tickers
+      const triggers = await findPmTriggers1h(symbol);
+      if (!triggers.length) return;
+      // Map triggers to nearest visible bar and override its color
+      const data = state.series.data() || [];
+      if (!data.length) return;
+      const toHighlight = new Set();
+      for (const t of triggers) {
+        let best = data[0].time, bestDiff = Math.abs(data[0].time - t);
+        for (let i=1;i<data.length;i++) {
+          const d = Math.abs(data[i].time - t);
+          if (d < bestDiff) { best = data[i].time; bestDiff = d; }
+        }
+        toHighlight.add(best);
+      }
+      const green = '#16a34a';
+      const next = data.map(pt => {
+        if (toHighlight.has(pt.time)) {
+          return { time: pt.time, open: pt.open, high: pt.high, low: pt.low, close: pt.close, color: green, wickColor: green, borderColor: green };
+        }
+        return pt;
+      });
+      state.series.setData(next);
     }
 
     async function loadMonthlyLevels(symbol) {
@@ -724,7 +782,8 @@
           console.log('🔍 DEBUG: Redrawing levels for timeframe change:', state.timespan);
           drawLevelLines(state.monthlyLevels);
         }
-        // if (pmState.enabled) evaluatePostMarketStrategy(); // Removed PM state
+        // Re-apply highlights for current timeframe
+        await applyPmHighlights(state.symbol);
       });
     });
 
