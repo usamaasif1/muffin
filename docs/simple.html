@@ -56,6 +56,10 @@
     .level-line.ppml { background: #f59e0b; }
     .level-line.ppmh { background: #ef4444; }
     /* PM UI removed */
+    /* Hover info panel like TradingView */
+    .hover-info { position: absolute; top: 6px; left: 6px; background: rgba(15,23,42,0.9); border: 1px solid #374151; border-radius: 6px; padding: 6px 8px; font-size: 12px; color: #e5e7eb; pointer-events: none; display: none; }
+    .pos { color: #10b981; }
+    .neg { color: #ef4444; }
   </style>
 </head>
 <body>
@@ -673,7 +677,31 @@
       showError('Unable to compute monthly levels from available chart data. Please try again later.');
     }
 
-
+    // Hover info: shows O/H/L/C and change % for the hovered bar
+    function setupHoverInfoOnce() {
+      if (!state?.chart || !state?.series) return;
+      if (state.__hoverBound) return;
+      state.__hoverBound = true;
+      let el = document.getElementById('hoverInfo');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'hoverInfo';
+        el.className = 'hover-info';
+        const container = document.getElementById('chart');
+        if (container) container.appendChild(el);
+      }
+      function fmt(n) { return (n != null && isFinite(n)) ? Number(n).toFixed(2) : '—'; }
+      state.chart.subscribeCrosshairMove(param => {
+        if (!param || !param.time || !param.point) { el.style.display = 'none'; return; }
+        const sd = (param.seriesData && param.seriesData.get && param.seriesData.get(state.series)) || null;
+        if (!sd || typeof sd.open !== 'number') { el.style.display = 'none'; return; }
+        const o = sd.open, h = sd.high, l = sd.low, c = sd.close;
+        const chg = (o ? ((c - o) / o) * 100 : 0);
+        const cls = chg >= 0 ? 'pos' : 'neg';
+        el.innerHTML = `O ${fmt(o)} H ${fmt(h)} L ${fmt(l)} C ${fmt(c)} | <span class="${cls}">${chg >= 0 ? '+' : ''}${fmt(chg)}%</span>`;
+        el.style.display = 'block';
+      });
+    }
 
     async function loadSymbol(symbol) {
       showError('');
@@ -689,6 +717,7 @@
           close: c.close 
         }));
         state.series.setData(allCandles);
+        setupHoverInfoOnce();
         state.symbol = symbol.toUpperCase();
         title.textContent = `${state.symbol} • ${state.timespan}`;
         renderWatch();
@@ -771,6 +800,7 @@
         }
         // Re-apply highlights for current timeframe
         await applyPmHighlights(state.symbol);
+        setupHoverInfoOnce();
       });
     });
 
