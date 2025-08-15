@@ -55,6 +55,18 @@
     .level-line.lmh { background: #10b981; }
     .level-line.ppml { background: #f59e0b; }
     .level-line.ppmh { background: #ef4444; }
+    /* Strategy card styling */
+    .strategy-card { background: #0f172a; border: 1px solid #374151; border-radius: 8px; padding: 12px; display: grid; gap: 8px; }
+    .strategy-title { display:flex; align-items:center; justify-content: space-between; font-weight: 600; color: #e5e7eb; }
+    .strategy-row { display:flex; align-items:center; justify-content: space-between; font-size: 13px; }
+    .hint { font-size: 11px; color:#94a3b8; }
+    /* Simple toggle switch */
+    .toggle { position: relative; width: 44px; height: 24px; display:inline-block; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .slider { position:absolute; cursor:pointer; inset:0; background:#374151; border-radius:999px; transition:.2s; }
+    .slider:before { content:""; position:absolute; height:18px; width:18px; left:3px; top:3px; background:white; border-radius:50%; transition:.2s; }
+    .toggle input:checked + .slider { background:#10b981; }
+    .toggle input:checked + .slider:before { transform: translateX(20px); }
   </style>
 </head>
 <body>
@@ -86,13 +98,12 @@
       <!-- New right-side panel with tabs: keeps chart centered and is extensible -->
       <aside id="rightPanel">
         <div id="tabBar">
-          <button class="tab-btn active" data-tab="monthly">Monthly</button>
-          <!-- Future tabs can be added here without changing chart layout -->
+          <!-- Monthly tab: label removed per requirement (kept as icon-only for space) -->
+          <button class="tab-btn active" data-tab="monthly" aria-label="Monthly Levels"></button>
+          <button class="tab-btn" data-tab="pm" aria-label="Post Market Strategy">Post Market</button>
         </div>
         <div id="tabContent">
           <div id="levelsPanel" class="tab-panel" data-tab="monthly" style="display:none;">
-            <div style="margin-bottom: 12px; font-weight: 600; color: #e5e7eb; font-size: 14px;">Monthly Levels</div>
-            <div id="levelsSource" style="margin-bottom: 8px; font-size: 11px; color: #94a3b8; font-style: italic;"></div>
             <div class="level-item">
               <span class="level-label">L.M.L:</span>
               <span class="level-value" id="lmlValue">-</span>
@@ -110,6 +121,22 @@
               <span class="level-value" id="ppmhValue">-</span>
             </div>
             <button id="retryLevels" style="margin-top: 12px; width: 100%; padding: 6px; background: #374151; border: 1px solid #4b5563; color: #e5e7eb; border-radius: 4px; cursor: pointer; font-size: 12px; display: none;">Retry</button>
+          </div>
+          <!-- Post Market Strategy panel -->
+          <div id="pmPanel" class="tab-panel" data-tab="pm" style="display:none;">
+            <div class="strategy-card">
+              <div class="strategy-title">
+                <span>Post Market Strategy</span>
+                <label class="toggle">
+                  <input type="checkbox" id="pmToggle" />
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="strategy-row"><span>Post-Market High:</span><span id="pmHighValue">—</span></div>
+              <div class="strategy-row"><span>Target Increase:</span><span id="pmTargetValue">20%</span></div>
+              <div class="strategy-row"><span>Signal:</span><span id="pmSignalValue">No Signal</span></div>
+              <div class="hint">Toggle Off disables strategy logic and drawing.</div>
+            </div>
           </div>
         </div>
       </aside>
@@ -492,16 +519,6 @@
       document.getElementById('ppmlValue').textContent = `$${levels.ppml.toFixed(2)}`;
       document.getElementById('ppmhValue').textContent = `$${levels.ppmh.toFixed(2)}`;
       
-      // Update source indicator
-      const sourceEl = document.getElementById('levelsSource');
-      if (source === 'monthly') {
-        sourceEl.textContent = 'Source: Monthly data';
-      } else if (source === 'daily') {
-        sourceEl.textContent = 'Source: Daily data (monthly rate limited)';
-      } else if (source === 'chart') {
-        sourceEl.textContent = 'Source: Chart data';
-      }
-      
       // Hide retry button when we have data
       document.getElementById('retryLevels').style.display = 'none';
       
@@ -637,6 +654,9 @@
             drawLevelLines(state.monthlyLevels);
           }
         }
+
+        // Evaluate post-market strategy if enabled
+        if (pmState.enabled) evaluatePostMarketStrategy();
       } catch (e) {
         showError(String(e && e.message ? e.message : e));
       }
@@ -700,10 +720,58 @@
           console.log('🔍 DEBUG: Redrawing levels for timeframe change:', state.timespan);
           drawLevelLines(state.monthlyLevels);
         }
+        if (pmState.enabled) evaluatePostMarketStrategy();
       });
     });
 
+    // --- Post Market Strategy (simple evaluation) ---
+    const pmState = { enabled: false, targetPct: 20, lastSignal: null };
+    function isPostMarket(ms) {
+      const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute:'2-digit', hour12:false });
+      const [hh, mm] = fmt.format(new Date(ms)).split(':').map(Number);
+      const mins = hh*60 + mm;
+      return mins > 16*60 && mins <= 20*60; // 16:01 - 20:00 NY
+    }
+    function computePostMarketHigh(seriesData) {
+      if (!seriesData || !seriesData.length) return null;
+      // find latest date with any post-market bars
+      const byDay = new Map();
+      seriesData.forEach(c => {
+        const d = new Date(c.time * 1000);
+        const y = d.getUTCFullYear(), m = d.getUTCMonth()+1, day = d.getUTCDate();
+        const key = `${y}-${String(m).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+        if (isPostMarket(c.t)) {
+          if (!byDay.has(key)) byDay.set(key, []);
+          byDay.get(key).push(c);
+        }
+      });
+      const keys = Array.from(byDay.keys()).sort();
+      if (!keys.length) return null;
+      const latest = byDay.get(keys[keys.length-1]);
+      if (!latest || !latest.length) return null;
+      return Math.max(...latest.map(b => b.high));
+    }
+    function evaluatePostMarketStrategy() {
+      if (!pmState.enabled || !state || !state.series) return;
+      const data = state.series.data();
+      if (!data || !data.length) return;
+      // filter latest post-market group
+      const pmHigh = computePostMarketHigh(data);
+      document.getElementById('pmHighValue').textContent = (pmHigh != null) ? `$${pmHigh.toFixed(2)}` : '—';
+      // signal based on open vs last closed within post-market
+      const pmBars = data.filter(b => isPostMarket(b.t)).sort((a,b)=>a.time-b.time);
+      if (!pmBars.length) { document.getElementById('pmSignalValue').textContent = 'No Signal'; return; }
+      const pmOpen = pmBars[0].open;
+      const nowSec = Math.floor(Date.now()/1000);
+      const closed = pmBars.filter(b => (nowSec - b.time) > 60);
+      const last = (closed.length ? closed[closed.length-1] : pmBars[pmBars.length-1]);
+      const gain = ((last.close - pmOpen) / pmOpen) * 100;
+      const triggered = gain >= pmState.targetPct;
+      document.getElementById('pmSignalValue').textContent = triggered ? `Buy Signal Triggered at $${last.close.toFixed(2)}` : 'No Signal';
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
+      // Tab activation
       // Simple tab activation (extensible): show selected tab panel
       function activateTab(tabId) {
         document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -719,6 +787,18 @@
       });
       activateTab('monthly');
 
+      // Strategy toggle wiring: when Off, skip logic; when On, evaluate
+      const pmToggle = document.getElementById('pmToggle');
+      if (pmToggle) {
+        pmToggle.addEventListener('change', () => {
+          pmState.enabled = !!pmToggle.checked;
+          if (pmState.enabled) evaluatePostMarketStrategy();
+          else {
+            document.getElementById('pmSignalValue').textContent = 'No Signal';
+          }
+        });
+      }
+ 
       renderWatch();
       loadSymbol('AAPL');
       
@@ -728,6 +808,7 @@
           console.log('🔍 DEBUG: Redrawing levels for window resize');
           drawLevelLines(state.monthlyLevels);
         }
+        if (pmState.enabled) evaluatePostMarketStrategy();
       });
       
       // Add retry button handler
