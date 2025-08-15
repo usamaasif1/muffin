@@ -19,7 +19,8 @@
     html, body { height: 100%; margin: 0; background: #0b1022; color: #e5e7eb; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto; }
     #wrap { display: flex; flex-direction: column; height: 100%; }
     header { padding: 10px 14px; border-bottom: 1px solid #1f2937; background: #0f172a; }
-    main { flex: 1; display: grid; grid-template-columns: 200px 1fr; }
+    /* Layout: left watchlist (200px) • centered chart (1fr) • right tabs (240px) */
+    main { flex: 1; display: grid; grid-template-columns: 200px 1fr 240px; }
     #sidebar { border-right: 1px solid #1f2937; padding: 10px; }
     #watch { display: flex; flex-direction: column; gap: 6px; }
     .watch-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border: 1px solid #374151; border-radius: 8px; cursor: pointer; }
@@ -30,7 +31,14 @@
     #search { width: 320px; padding: 8px 10px; border-radius: 8px; border: 1px solid #374151; background: #0a0f20; color: #e5e7eb; }
     #go { padding: 8px 12px; border-radius: 8px; border: 1px solid #374151; background: #2563eb; color: white; cursor: pointer; }
     #add { padding: 8px 12px; border-radius: 8px; border: 1px solid #374151; background: #10b981; color: white; cursor: pointer; }
-    #levelsPanel { position: fixed; right: 20px; top: 80px; width: 200px; background: #0f172a; border: 1px solid #374151; border-radius: 8px; padding: 16px; z-index: 1000; }
+    /* Right-side tabs scaffold (extensible for future tabs) */
+    #rightPanel { border-left: 1px solid #1f2937; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+    #tabBar { display: flex; gap: 6px; }
+    .tab-btn { padding: 6px 10px; border-radius: 8px; border: 1px solid #374151; background: #0a0f20; color: #e5e7eb; cursor: pointer; }
+    .tab-btn.active { background: #2563eb; color: white; }
+    .tab-panel { display: none; }
+    /* Levels panel now lives in the right panel (not fixed overlay) */
+    #levelsPanel { display: none; background: #0f172a; border: 1px solid #374151; border-radius: 8px; padding: 16px; }
     .level-item { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px; }
     .level-item:last-child { margin-bottom: 0; }
     .level-label { color: #94a3b8; }
@@ -75,30 +83,37 @@
         <div id="watch"></div>
       </aside>
       <div id="chart"></div>
+      <!-- New right-side panel with tabs: keeps chart centered and is extensible -->
+      <aside id="rightPanel">
+        <div id="tabBar">
+          <button class="tab-btn active" data-tab="monthly">Monthly</button>
+          <!-- Future tabs can be added here without changing chart layout -->
+        </div>
+        <div id="tabContent">
+          <div id="levelsPanel" class="tab-panel" data-tab="monthly" style="display:none;">
+            <div style="margin-bottom: 12px; font-weight: 600; color: #e5e7eb; font-size: 14px;">Monthly Levels</div>
+            <div id="levelsSource" style="margin-bottom: 8px; font-size: 11px; color: #94a3b8; font-style: italic;"></div>
+            <div class="level-item">
+              <span class="level-label">L.M.L:</span>
+              <span class="level-value" id="lmlValue">-</span>
+            </div>
+            <div class="level-item">
+              <span class="level-label">L.M.H:</span>
+              <span class="level-value" id="lmhValue">-</span>
+            </div>
+            <div class="level-item">
+              <span class="level-label">P.P.M.L:</span>
+              <span class="level-value" id="ppmlValue">-</span>
+            </div>
+            <div class="level-item">
+              <span class="level-label">P.P.M.H:</span>
+              <span class="level-value" id="ppmhValue">-</span>
+            </div>
+            <button id="retryLevels" style="margin-top: 12px; width: 100%; padding: 6px; background: #374151; border: 1px solid #4b5563; color: #e5e7eb; border-radius: 4px; cursor: pointer; font-size: 12px; display: none;">Retry</button>
+          </div>
+        </div>
+      </aside>
     </main>
-    
-    <!-- Levels Panel -->
-    <div id="levelsPanel" style="display: none;">
-      <div style="margin-bottom: 12px; font-weight: 600; color: #e5e7eb; font-size: 14px;">Monthly Levels</div>
-      <div id="levelsSource" style="margin-bottom: 8px; font-size: 11px; color: #94a3b8; font-style: italic;"></div>
-      <div class="level-item">
-        <span class="level-label">L.M.L:</span>
-        <span class="level-value" id="lmlValue">-</span>
-      </div>
-      <div class="level-item">
-        <span class="level-label">L.M.H:</span>
-        <span class="level-value" id="lmhValue">-</span>
-      </div>
-      <div class="level-item">
-        <span class="level-label">P.P.M.L:</span>
-        <span class="level-value" id="ppmlValue">-</span>
-      </div>
-      <div class="level-item">
-        <span class="level-label">P.P.M.H:</span>
-        <span class="level-value" id="ppmhValue">-</span>
-      </div>
-      <button id="retryLevels" style="margin-top: 12px; width: 100%; padding: 6px; background: #374151; border: 1px solid #4b5563; color: #e5e7eb; border-radius: 4px; cursor: pointer; font-size: 12px; display: none;">Retry</button>
-    </div>
   </div>
 
   <script>
@@ -689,6 +704,21 @@
     });
 
     window.addEventListener('DOMContentLoaded', () => {
+      // Simple tab activation (extensible): show selected tab panel
+      function activateTab(tabId) {
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+          btn.classList.toggle('active', btn.getAttribute('data-tab') === tabId);
+        });
+        document.querySelectorAll('.tab-panel').forEach(p => {
+          const isMatch = p.getAttribute('data-tab') === tabId;
+          p.style.display = isMatch ? 'block' : 'none';
+        });
+      }
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => activateTab(btn.getAttribute('data-tab')));
+      });
+      activateTab('monthly');
+
       renderWatch();
       loadSymbol('AAPL');
       
