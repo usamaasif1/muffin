@@ -159,7 +159,9 @@
       watch: JSON.parse(localStorage.getItem('simple.watch') || '[]'),
       monthlyLevels: null,
       levelLines: [],
-      timeToBar: null // New: to quickly find bars by time
+      timeToBar: null, // New: to quickly find bars by time
+      seenAlerts: new Set(),
+      seenPm: new Set()
     };
 
     function apiUrl(endpoint, query) {
@@ -581,8 +583,10 @@
     }
     function renderAlerts(items) {
       const box = document.getElementById('alertsList'); if (!box) return;
-      box.innerHTML = '';
       items.forEach(it => {
+        const key = `${it.symbol}|${it.level}|${it.timeSec}`;
+        if (state.seenAlerts.has(key)) return;
+        state.seenAlerts.add(key);
         const row = document.createElement('div'); row.className = 'pm-item';
         row.innerHTML = `<div><b>${it.symbol}</b></div>
           <div>Level: <span class="mono">${it.level}</span></div>
@@ -592,8 +596,10 @@
     }
     function renderPmWatchlist(items) {
       const box = document.getElementById('pmWatchList'); if (!box) return;
-      box.innerHTML = '';
       items.forEach(it => {
+        const key = `${it.symbol}|${it.timeSec}`;
+        if (state.seenPm.has(key)) return;
+        state.seenPm.add(key);
         const row = document.createElement('div'); row.className = 'pm-item';
         row.innerHTML = `<div><b>${it.symbol}</b></div>
           <div>Time: <span class="mono">${new Date(it.timeSec*1000).toLocaleTimeString('en-US',{hour12:false})} NY</span></div>`;
@@ -833,6 +839,11 @@
         state.symbol = symbol.toUpperCase();
         title.textContent = `${state.symbol} • ${state.timespan}`;
         renderWatch();
+        // reset alert/watchlist UI and seen sets on new symbol
+        const al = document.getElementById('alertsList'); if (al) al.innerHTML = '';
+        const pw = document.getElementById('pmWatchList'); if (pw) pw.innerHTML = '';
+        state.seenAlerts = new Set();
+        state.seenPm = new Set();
         
         // Load monthly levels for the new symbol (only if symbol changed or no levels exist)
         if (state.lastComputedSymbol !== symbol || !state.monthlyLevels) {
