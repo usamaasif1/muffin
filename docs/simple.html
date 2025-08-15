@@ -71,6 +71,10 @@
     #pmAlertsList, #pmWatchList { display: grid; gap: 6px; }
     .pm-item { border: 1px solid #374151; border-radius: 6px; padding: 8px; background: #0a0f20; font-size: 12px; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas; }
+    .input { padding: 6px 8px; border-radius: 6px; border: 1px solid #374151; background: #0a0f20; color: #e5e7eb; }
+    .btn { padding: 6px 10px; border-radius: 6px; border: 1px solid #374151; background: #2563eb; color: #fff; cursor: pointer; }
+    .chips { display:flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+    .chip { padding: 2px 8px; border-radius: 999px; background:#0a0f20; border:1px solid #374151; font-size: 11px; }
   </style>
 </head>
 <body>
@@ -136,6 +140,12 @@
                   <span class="slider"></span>
                 </label>
               </div>
+              <div class="strategy-row" style="gap:8px; align-items:center;">
+                <span>Tickers:</span>
+                <input id="pmTickers" class="input" placeholder="AAPL, TSLA, AMC" style="flex:1;" />
+                <button id="pmSaveTickers" class="btn">Save</button>
+              </div>
+              <div id="pmTickerChips" class="chips"></div>
               <div class="strategy-row"><span>Post-Market High:</span><span id="pmHighValue">—</span></div>
               <div class="strategy-row"><span>Target Increase:</span><span id="pmTargetValue">20%</span></div>
               <div class="strategy-row"><span>Signal:</span><span id="pmSignalValue">No Signal</span></div>
@@ -536,7 +546,7 @@
     }
 
     // ===== Post-Market Detection Flow =====
-    const pmState = { enabled: false, targetPct: 20, timer: null, lastResetDate: null };
+    const pmState = { enabled: false, targetPct: 20, timer: null, lastResetDate: null, tickers: [] };
     const pmStore = {
       alerts: [], // {symbol, regularClose, currentPrice, pct, timeSec}
       watchlist: [], // {symbol, level, closePrice, timeSec}
@@ -641,8 +651,8 @@
       pmMarkers.push({ time: barTimeSec, position: 'aboveBar', color: '#38bdf8', shape: 'circle', text: 'Added to PM Watchlist' });
       updateMarkers();
     }
-    // Stage 1 – Post-Market Alert
-    async function detectPostMarketMove(symbol) {
+    // Detect Stage 1 for a single symbol
+    async function detectPostMarketMoveForSymbol(symbol) {
       const now = Date.now();
       if (!isPostMarketNY(now)) return; // only monitor post-market
       const regularClose = await getTodayRegularClose(symbol);
@@ -662,8 +672,8 @@
         addAlertMarkerIfActiveSymbol(symbol, lastClosed.time);
       }
     }
-    // Stage 2 – Level Confirmation & Watchlist
-    async function checkLevelConfirmation(symbol) {
+    // Detect Stage 2 for a single symbol
+    async function checkLevelConfirmationForSymbol(symbol) {
       const now = Date.now();
       if (!isPostMarketNY(now)) return;
       const today = nyDateStr(now);
@@ -714,14 +724,49 @@
       }
     }
 
+    // Public modular functions operating on a list of tickers
+    async function detectPostMarketMove(tickerList) {
+      const list = Array.isArray(tickerList) ? tickerList : [];
+      for (const sym of list) { await detectPostMarketMoveForSymbol(sym); }
+    }
+    async function checkLevelConfirmation(tickerList) {
+      const list = Array.isArray(tickerList) ? tickerList : [];
+      for (const sym of list) { await checkLevelConfirmationForSymbol(sym); }
+    }
+
+    function parseTickers(input) {
+      return (input || '')
+        .split(',')
+        .map(s => s.trim().toUpperCase())
+        .filter(s => /^[A-Z0-9.\-]+$/.test(s));
+    }
+    function saveTickers(list) {
+      pmState.tickers = Array.from(new Set(list));
+      try { localStorage.setItem('pm.tickers', JSON.stringify(pmState.tickers)); } catch {}
+      renderTickerChips();
+    }
+    function loadTickers() {
+      try {
+        const raw = localStorage.getItem('pm.tickers');
+        const arr = raw ? JSON.parse(raw) : [];
+        pmState.tickers = Array.isArray(arr) ? arr : [];
+      } catch { pmState.tickers = []; }
+      renderTickerChips();
+    }
+    function renderTickerChips() {
+      const box = document.getElementById('pmTickerChips'); if (!box) return;
+      box.innerHTML = '';
+      pmState.tickers.forEach(t => {
+        const span = document.createElement('span'); span.className = 'chip'; span.textContent = t; box.appendChild(span);
+      });
+    }
+
     async function pmMonitorTick() {
       if (!pmState.enabled) return;
       if (shouldDailyResetNow()) resetDailyPmState();
-      const symbols = Array.from(new Set([state.symbol, ...(state.watch||[])]).values()).filter(Boolean);
-      for (const sym of symbols) {
-        await detectPostMarketMove(sym);
-        await checkLevelConfirmation(sym);
-      }
+      const symbols = (pmState.tickers || []).slice();
+      await detectPostMarketMove(symbols);
+      await checkLevelConfirmation(symbols);
     }
     function startPmMonitor() {
       if (pmState.timer) clearInterval(pmState.timer);
@@ -1003,7 +1048,20 @@
           else { document.getElementById('pmSignalValue').textContent = 'No Signal'; stopPmMonitor(); }
         });
       }
- 
+
+      // Load tickers from storage and wire Save
+      loadTickers();
+      const tickersInput = document.getElementById('pmTickers');
+      const saveBtn = document.getElementById('pmSaveTickers');
+      if (tickersInput && saveBtn) {
+        // preload text with saved list
+        tickersInput.value = (pmState.tickers||[]).join(', ');
+        saveBtn.addEventListener('click', () => {
+          const list = parseTickers(tickersInput.value);
+          saveTickers(list);
+        });
+      }
+
       renderWatch();
       loadSymbol('AAPL');
       
