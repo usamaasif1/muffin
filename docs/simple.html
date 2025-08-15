@@ -60,6 +60,10 @@
     .hover-info { position: absolute; top: 6px; left: 6px; background: rgba(15,23,42,0.9); border: 1px solid #374151; border-radius: 6px; padding: 6px 8px; font-size: 12px; color: #e5e7eb; pointer-events: none; display: none; z-index: 2000; }
     .pos { color: #10b981; }
     .neg { color: #ef4444; }
+    /* Minimal styles for alerts/watchlist */
+    .panel-title { color: #94a3b8; font-size: 12px; margin: 6px 0; }
+    .pm-item { border: 1px solid #374151; border-radius: 6px; padding: 8px; background: #0a0f20; font-size: 12px; margin-bottom: 6px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas; }
   </style>
 </head>
 <body>
@@ -119,6 +123,8 @@
           <div id="alertsPanel" class="tab-panel" data-tab="alerts" style="display:none;">
             <div class="panel-title" style="margin-top:6px;">Alerts</div>
             <div id="alertsList"></div>
+            <div class="panel-title" style="margin-top:6px;">Post-Market Watchlist</div>
+            <div id="pmWatchList"></div>
           </div>
         </div>
       </aside>
@@ -584,6 +590,16 @@
         box.appendChild(row);
       });
     }
+    function renderPmWatchlist(items) {
+      const box = document.getElementById('pmWatchList'); if (!box) return;
+      box.innerHTML = '';
+      items.forEach(it => {
+        const row = document.createElement('div'); row.className = 'pm-item';
+        row.innerHTML = `<div><b>${it.symbol}</b></div>
+          <div>Time: <span class="mono">${new Date(it.timeSec*1000).toLocaleTimeString('en-US',{hour12:false})} NY</span></div>`;
+        box.appendChild(row);
+      });
+    }
     function activateAlertsTab() {
       const mBtn = document.querySelector('.tab-btn[data-tab="monthly"]');
       const aBtn = document.querySelector('.tab-btn[data-tab="alerts"]');
@@ -641,6 +657,20 @@
       if (alerts.length) {
         renderAlerts(alerts);
         activateAlertsTab();
+      }
+      // Build Post-Market Watchlist for orange bars between 16:00–20:00 NY
+      const pmItems = [];
+      for (const pt of next) {
+        const isOrange = pt && pt.color === orange;
+        const isLastDay = nyDateStr((pt.time || 0) * 1000) === lastDate;
+        if (!isOrange || !isLastDay) continue;
+        const { hh } = nyParts((pt.time || 0) * 1000);
+        if (hh >= 16 && hh < 20) {
+          pmItems.push({ symbol: state.symbol, timeSec: pt.time });
+        }
+      }
+      if (pmItems.length) {
+        renderPmWatchlist(pmItems);
       }
     }
 
