@@ -525,7 +525,7 @@
     // ===== Post-Market Detection Flow =====
     const pmState = { targetPct: 20, lastResetDate: null };
     const pmStore = {
-      alerts: [], // {symbol, regularClose, currentPrice, pct, timeSec}
+      alerts: [], // {symbol, basePrice, currentPrice, pct, timeSec}
       watchlist: [], // {symbol, level, closePrice, timeSec}
       alertedSet: new Set(), // key: nyDate|symbol
       watchSet: new Set(), // key: nyDate|symbol|level
@@ -585,7 +585,7 @@
         const t = new Date(a.timeSec*1000);
         const tm = new Intl.DateTimeFormat('en-US', { timeZone:'America/New_York', hour:'2-digit', minute:'2-digit', hour12:false }).format(t);
         row.innerHTML = `<div><b>${a.symbol}</b></div>
-          <div>Regular Close: <span class="mono">$${a.regularClose.toFixed(2)}</span></div>
+          <div>Base (1h ago): <span class="mono">$${a.basePrice.toFixed(2)}</span></div>
           <div>Current: <span class="mono">$${a.currentPrice.toFixed(2)}</span> • Change: <span class="mono">${pct}</span></div>
           <div class="mono" style="color:#94a3b8;">${tm} NY</div>`;
         box.appendChild(row);
@@ -650,7 +650,8 @@
       pmMarkers.push({ time: barTimeSec, position: 'aboveBar', color: '#38bdf8', shape: 'circle', text: 'Added to PM Watchlist' });
       updateMarkers();
     }
-    // Detect Stage 1 for a single symbol (latest or current post-market)
+    // Detect Stage 1 for a single symbol (latest/current post-market):
+    // Trigger when within any rolling 1-hour window the gain ≥ 17%.
     async function detectPostMarketMoveForSymbol(symbol) {
       const now = Date.now();
       let bars = [];
@@ -671,20 +672,28 @@
         if (pm.length) { targetDate = dates[i]; pmBars = pm.sort((a,b)=>a.t-b.t); break; }
       }
       if (!targetDate || !pmBars.length) return;
-      // Regular close is the last regular-hours candle of the same targetDate
-      const regulars = (byDate.get(targetDate)||[]).filter(x => isRegularHoursNY(x.t)).sort((a,b)=>a.t-b.t);
-      if (!regulars.length) return;
-      const regularClose = regulars[regulars.length-1].close;
-      // Find first post-market bar where gain >= 17%
-      const trigger = pmBars.find(b => ((b.close - regularClose) / regularClose) >= 0.17);
-      if (!trigger) return;
-      const key = `${targetDate}|${symbol}`;
-      if (pmStore.alertedSet.has(key)) return;
-      pmStore.alertedSet.add(key);
-      pmStore.alerts.push({ symbol, regularClose, currentPrice: trigger.close, pct: (trigger.close - regularClose) / regularClose, timeSec: trigger.time });
-      renderPmAlerts();
-      activatePmTab();
-      addAlertMarkerIfActiveSymbol(symbol, trigger.time);
+      // Rolling 1-hour window over post-market bars
+      let startIdx = 0;
+      for (let i = 0; i < pmBars.length; i++) {
+        const end = pmBars[i];
+        const cutoff = end.time - 3600; // seconds
+        while (startIdx < i && pmBars[startIdx].time < cutoff) startIdx++;
+        const base = pmBars[startIdx];
+        if (!base) continue;
+        if (base.close === 0) continue;
+        const change = (end.close - base.close) / base.close;
+        if (change >= 0.17) {
+          const key = `${targetDate}|${symbol}`;
+          if (!pmStore.alertedSet.has(key)) {
+            pmStore.alertedSet.add(key);
+            pmStore.alerts.push({ symbol, basePrice: base.close, currentPrice: end.close, pct: change, timeSec: end.time });
+            renderPmAlerts();
+            activatePmTab();
+            addAlertMarkerIfActiveSymbol(symbol, end.time);
+          }
+          break;
+        }
+      }
     }
     // Detect Stage 2 for a single symbol
     async function checkLevelConfirmationForSymbol(symbol) {
