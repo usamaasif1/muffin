@@ -130,33 +130,10 @@
             </div>
             <button id="retryLevels" style="margin-top: 12px; width: 100%; padding: 6px; background: #374151; border: 1px solid #4b5563; color: #e5e7eb; border-radius: 4px; cursor: pointer; font-size: 12px; display: none;">Retry</button>
           </div>
-          <!-- Post Market Strategy panel -->
+          <!-- Post Market Alerts panel -->
           <div id="pmPanel" class="tab-panel" data-tab="pm" style="display:none;">
-            <div class="strategy-card">
-              <div class="strategy-title">
-                <span>Post Market Strategy</span>
-                <label class="toggle">
-                  <input type="checkbox" id="pmToggle" />
-                  <span class="slider"></span>
-                </label>
-              </div>
-              <div class="strategy-row" style="gap:8px; align-items:center;">
-                <span>Tickers:</span>
-                <input id="pmTickers" class="input" placeholder="AAPL, TSLA, AMC" style="flex:1;" />
-                <button id="pmSaveTickers" class="btn">Save</button>
-              </div>
-              <div id="pmTickerChips" class="chips"></div>
-              <div class="strategy-row"><span>Post-Market High:</span><span id="pmHighValue">—</span></div>
-              <div class="strategy-row"><span>Target Increase:</span><span id="pmTargetValue">20%</span></div>
-              <div class="strategy-row"><span>Signal:</span><span id="pmSignalValue">No Signal</span></div>
-              <div class="hint">Toggle Off disables strategy logic and drawing.</div>
-            </div>
-
             <div class="panel-title" style="margin-top:10px;">Post-Market Alerts</div>
             <div id="pmAlertsList"></div>
-
-            <div class="panel-title" style="margin-top:10px;">Post-Market Watchlist</div>
-            <div id="pmWatchList"></div>
           </div>
         </div>
       </aside>
@@ -546,7 +523,7 @@
     }
 
     // ===== Post-Market Detection Flow =====
-    const pmState = { enabled: false, targetPct: 20, timer: null, lastResetDate: null, tickers: [] };
+    const pmState = { targetPct: 20, lastResetDate: null };
     const pmStore = {
       alerts: [], // {symbol, regularClose, currentPrice, pct, timeSec}
       watchlist: [], // {symbol, level, closePrice, timeSec}
@@ -759,6 +736,7 @@
       for (const sym of list) { await checkLevelConfirmationForSymbol(sym); }
     }
 
+    /* removed ticker input helpers */
     function parseTickers(input) {
       return (input || '')
         .split(',')
@@ -787,21 +765,17 @@
     }
 
     async function pmMonitorTick() {
-      if (!pmState.enabled) return;
       if (shouldDailyResetNow()) resetDailyPmState();
-      const symbols = (pmState.tickers || []).slice();
-      await detectPostMarketMove(symbols);
-      await checkLevelConfirmation(symbols);
+      // No background scan now; Stage 1 runs on search only
     }
     function startPmMonitor() {
       if (pmState.timer) clearInterval(pmState.timer);
       pmState.timer = setInterval(pmMonitorTick, 60000); // every 60s
       pmMonitorTick();
     }
-    function stopPmMonitor() {
-      if (pmState.timer) { clearInterval(pmState.timer); pmState.timer = null; }
-      pmMarkers = []; updateMarkers();
-    }
+         function stopPmMonitor() {
+       pmMarkers = []; updateMarkers();
+     }
 
     async function loadMonthlyLevels(symbol) {
       try {
@@ -1064,28 +1038,7 @@
       });
       activateTab('monthly');
 
-      // Strategy toggle wiring: when Off, skip logic; when On, evaluate
-      const pmToggle = document.getElementById('pmToggle');
-      if (pmToggle) {
-        pmToggle.addEventListener('change', () => {
-          pmState.enabled = !!pmToggle.checked;
-          if (pmState.enabled) { evaluatePostMarketStrategy(); startPmMonitor(); }
-          else { document.getElementById('pmSignalValue').textContent = 'No Signal'; stopPmMonitor(); }
-        });
-      }
-
-      // Load tickers from storage and wire Save
-      loadTickers();
-      const tickersInput = document.getElementById('pmTickers');
-      const saveBtn = document.getElementById('pmSaveTickers');
-      if (tickersInput && saveBtn) {
-        // preload text with saved list
-        tickersInput.value = (pmState.tickers||[]).join(', ');
-        saveBtn.addEventListener('click', () => {
-          const list = parseTickers(tickersInput.value);
-          saveTickers(list);
-        });
-      }
+              // Post-market detection is triggered by the regular search only
 
       renderWatch();
       loadSymbol('AAPL');
