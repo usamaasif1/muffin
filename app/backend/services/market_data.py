@@ -114,6 +114,40 @@ def _yahoo_interval_and_range(timespan: Timespan, window: str) -> Tuple[str, str
     # Range mirrors the provided window
     return interval, window
 
+# Cap Yahoo ranges to avoid 429 on free tier
+def _cap_yahoo_range(timespan: Timespan, requested_range: str) -> str:
+    r = (requested_range or '').lower()
+    if r and r != 'max':
+        try:
+            if r.endswith('d'):
+                days = int(r[:-1])
+                if timespan == '1m' and days > 14:
+                    return '14d'
+                if timespan == '5m' and days > 60:
+                    return '60d'
+                if timespan == '15m' and days > 180:
+                    return '180d'
+                if timespan == '1h' and days > 180:
+                    return '180d'
+            if r.endswith('y'):
+                years = int(r[:-1])
+                if timespan == 'day' and years > 10:
+                    return '10y'
+        except Exception:
+            pass
+        return requested_range
+    if timespan == '1m':
+        return '14d'
+    if timespan == '5m':
+        return '60d'
+    if timespan == '15m':
+        return '180d'
+    if timespan == '1h':
+        return '180d'
+    if timespan == 'day':
+        return '10y'
+    return '30y'
+
 
 def fetch_candles(
     symbol: str,
@@ -323,19 +357,14 @@ def _fetch_candles_alpaca(
 
 
 def _fetch_candles_yahoo(symbol: str, timespan: Timespan, window: str) -> List[Candle]:
-    # Reduce aggressive ranges to avoid Yahoo throttling on free tier
-    if window == "365d" and timespan == "1h":
-        rng = "180d"
-    else:
-        interval, rng = _yahoo_interval_and_range(timespan, window)
-        # keep computed rng
-        # normalize if very large hourly range requested
-        if timespan == "1h" and rng == "max":
-            rng = "180d"
+    interval, rng = _yahoo_interval_and_range(timespan, window)
+    rng = _cap_yahoo_range(timespan, rng)
     url = (
         f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={interval}&range={rng}&includePrePost=true"
     )
     resp = requests.get(url, timeout=30)
+    if resp.status_code == 429:
+        raise MarketDataError("429: Too Many Requests (Yahoo)")
     resp.raise_for_status()
     data = resp.json()
     result = (data.get("chart") or {}).get("result")
