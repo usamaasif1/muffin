@@ -663,18 +663,16 @@
           const ms = (pt.time || 0) * 1000;
           if (!isPostMarketNY(ms)) continue;
           const low = pt.low, high = pt.high, open = pt.open, close = pt.close;
-          if (typeof low !== 'number' || typeof high !== 'number') continue;
+          if (typeof low !== 'number' || typeof high !== 'number' || typeof open !== 'number') continue;
           const touched = levels.filter(L => typeof L.value === 'number' && low <= L.value && L.value <= high);
           if (!touched.length) continue;
-          let chosen;
-          if (typeof open === 'number' && typeof close === 'number' && close < open) {
-            // Down move: choose lowest touched level (e.g., L.M.L)
-            chosen = touched.reduce((a, b) => (a.value <= b.value ? a : b));
-          } else {
-            // Up move or flat: choose highest touched level (e.g., L.M.H)
-            chosen = touched.reduce((a, b) => (a.value >= b.value ? a : b));
-          }
-          alerts.push({ symbol: state.symbol, level: chosen.key, timeSec: pt.time });
+          // Choose the level actually crossed: nearest to open price
+          const chosen = touched.reduce((best, L) => {
+            const dist = Math.abs(L.value - open);
+            if (!best) return { L, dist };
+            return dist < best.dist ? { L, dist } : best;
+          }, null);
+          if (chosen && chosen.L) alerts.push({ symbol: state.symbol, level: chosen.L.key, timeSec: pt.time });
         }
       }
       if (alerts.length) {
@@ -716,8 +714,7 @@
         // Compute monthly levels from existing candlestick data
         const levels = computeMonthlyLevelsFromCandles(seriesData);
         
-        alert('🔄 NEW CODE IS RUNNING! VERSION 1.0 - LEVELS COMPUTED - TIMESTAMP: ' + new Date().toISOString());
-        console.log('🔄 FORCED REFRESH - NEW CODE VERSION 1.0 - TIMESTAMP:', new Date().toISOString());
+        console.log('🔄 Levels computed - timestamp:', new Date().toISOString());
         console.log('🔍 DEBUG: Levels computed from candles:', {
           lml: levels.lml,
           lmh: levels.lmh,
@@ -855,9 +852,9 @@
         state.symbol = symbol.toUpperCase();
         title.textContent = `${state.symbol} • ${state.timespan}`;
         renderWatch();
-        // reset Alerts UI and seen set on new symbol (keep PM watchlist persistent)
-        const al = document.getElementById('alertsList'); if (al) al.innerHTML = '';
-        state.seenAlerts = new Set();
+        // keep alerts persistent across loads; do not reset seen set here
+        // const al = document.getElementById('alertsList'); if (al) al.innerHTML = '';
+        // state.seenAlerts = new Set();
         
         // Load monthly levels for the new symbol (only if symbol changed or no levels exist)
         if (state.lastComputedSymbol !== symbol || !state.monthlyLevels) {
