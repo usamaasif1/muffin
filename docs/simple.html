@@ -418,54 +418,27 @@
       
       clearLevelLines();
       
-      // Use the chart library's built-in createPriceLine method for accurate positioning
-      if (levels.lml != null) {
-        console.log('🚨 Creating L.M.L line at price:', levels.lml);
-        state.levelLines.push(state.series.createPriceLine({ 
-          price: levels.lml, 
-          color: '#94a3b8', 
-          lineWidth: 2, 
-          lineStyle: 1, 
-          axisLabelVisible: true, 
-          title: 'L.M.L' 
-        }));
-      }
+      // Build definitions and dedupe by price (avoid duplicate labels when prices coincide)
+      const defs = [];
+      if (levels.lml != null) defs.push({ price: levels.lml, color: '#94a3b8', lineWidth: 2, lineStyle: 1, title: 'L.M.L' });
+      if (levels.lmh != null) defs.push({ price: levels.lmh, color: '#94a3b8', lineWidth: 2, lineStyle: 1, title: 'L.M.H' });
+      if (levels.ppml != null) defs.push({ price: levels.ppml, color: '#38bdf8', lineWidth: 2, lineStyle: 2, title: 'P.P.M.L' });
+      if (levels.ppmh != null) defs.push({ price: levels.ppmh, color: '#38bdf8', lineWidth: 2, lineStyle: 2, title: 'P.P.M.H' });
       
-      if (levels.lmh != null) {
-        console.log('🚨 Creating L.M.H line at price:', levels.lmh);
+      const epsilon = 1e-6;
+      const added = [];
+      defs.forEach(d => {
+        if (added.some(p => Math.abs(p - d.price) < epsilon)) return;
         state.levelLines.push(state.series.createPriceLine({ 
-          price: levels.lmh, 
-          color: '#94a3b8', 
-          lineWidth: 2, 
-          lineStyle: 1, 
+          price: d.price, 
+          color: d.color, 
+          lineWidth: d.lineWidth, 
+          lineStyle: d.lineStyle, 
           axisLabelVisible: true, 
-          title: 'L.M.H' 
+          title: d.title 
         }));
-      }
-      
-      if (levels.ppml != null) {
-        console.log('🚨 Creating P.P.M.L line at price:', levels.ppml);
-        state.levelLines.push(state.series.createPriceLine({ 
-          price: levels.ppml, 
-          color: '#38bdf8', 
-          lineWidth: 2, 
-          lineStyle: 2, 
-          axisLabelVisible: true, 
-          title: 'P.P.M.L' 
-        }));
-      }
-      
-      if (levels.ppmh != null) {
-        console.log('🚨 Creating P.P.M.H line at price:', levels.ppmh);
-        state.levelLines.push(state.series.createPriceLine({ 
-          price: levels.ppmh, 
-          color: '#38bdf8', 
-          lineWidth: 2, 
-          lineStyle: 2, 
-          axisLabelVisible: true, 
-          title: 'P.P.M.H' 
-        }));
-      }
+        added.push(d.price);
+      });
       
       // Store the levels we just drew to prevent duplicates
       state.lastDrawnLevels = {
