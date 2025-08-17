@@ -621,26 +621,32 @@
     }
     async function applyPmHighlights(symbol) {
       if (!state || !state.series) return;
-      // Apply for the active symbol (no user-list guard)
-      // Only affect 1-hour timeframe candles as requested
+      // Only affect 1-hour timeframe candles
       if (state.timespan !== '1h') return;
       const data = state.series.data() || [];
       if (!data.length) return;
-      // Limit scope to last active NY day only
-      const lastBar = data[data.length - 1];
-      const lastDate = nyDateStr((lastBar.time || 0) * 1000);
+
+      const thr = 0.15; // 15%
       const orange = '#f59e0b';
+
+      // Recompute bar colors: color ALL post-market bars whose move >= 15% (up or down)
       const next = data.map(pt => {
-        const isLastDay = nyDateStr((pt.time || 0) * 1000) === lastDate;
-        const o = pt.open, h = pt.high;
-        const hit = isLastDay && (typeof o === 'number' && o > 0 && typeof h === 'number') ? ((h - o) / o) >= 0.17 : false;
+        if (!pt || typeof pt.time !== 'number') return pt;
+        const ms = pt.time * 1000;
+        if (!isPostMarketNY(ms)) return pt;
+        const o = pt.open, h = pt.high, l = pt.low;
+        if (typeof o !== 'number' || o <= 0 || typeof h !== 'number' || typeof l !== 'number') return pt;
+        const up = (h - o) / o;
+        const down = (o - l) / o;
+        const hit = (up >= thr) || (down >= thr);
         if (hit) {
           return { time: pt.time, open: pt.open, high: pt.high, low: pt.low, close: pt.close, color: orange, wickColor: orange, borderColor: orange };
         }
         return pt;
       });
       setSeriesDataWithIndex(next);
-      // Build alerts for candles that are orange and cross any key level
+
+      // Build alerts for orange post-market bars crossing any key level
       const alerts = [];
       const lv = state.monthlyLevels || null;
       if (lv) {
@@ -652,9 +658,9 @@
         ].filter(L => L.value != null).sort((a,b) => Number(b.value) - Number(a.value));
         for (const pt of next) {
           const isOrange = pt && pt.color === orange;
-          const isLastDay = nyDateStr((pt.time || 0) * 1000) === lastDate;
           if (!isOrange) continue;
-          if (!isLastDay) continue;
+          const ms = (pt.time || 0) * 1000;
+          if (!isPostMarketNY(ms)) continue;
           for (const L of levels) {
             if (typeof pt.high === 'number' && pt.high >= L.value) {
               alerts.push({ symbol: state.symbol, level: L.key, timeSec: pt.time });
@@ -667,7 +673,10 @@
         renderAlerts(alerts);
         activateAlertsTab();
       }
-      // Build Post-Market Watchlist for orange bars between 16:00–20:00 NY
+
+      // Maintain Post-Market Watchlist: only for last NY day to avoid flooding
+      const lastBar = data[data.length - 1];
+      const lastDate = nyDateStr((lastBar.time || 0) * 1000);
       for (const pt of next) {
         const isOrange = pt && pt.color === orange;
         const isLastDay = nyDateStr((pt.time || 0) * 1000) === lastDate;
