@@ -571,10 +571,7 @@
         if (state.seenAlerts.has(symKey)) return;
         state.seenAlerts.add(symKey);
         const row = document.createElement('div'); row.className = 'pm-item';
-        const nyTime = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(it.timeSec * 1000));
-        row.innerHTML = `<div><b>${it.symbol}</b></div>
-          <div>Level: <span class="mono">${it.level}</span></div>
-          <div>Time: <span class="mono">${nyTime} NY</span></div>`;
+        row.innerHTML = `<div><b>${it.symbol}</b></div>`;
         box.appendChild(row);
       });
     }
