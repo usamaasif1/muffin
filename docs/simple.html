@@ -571,9 +571,10 @@
         if (state.seenAlerts.has(symKey)) return;
         state.seenAlerts.add(symKey);
         const row = document.createElement('div'); row.className = 'pm-item';
+        const nyTime = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(it.timeSec * 1000));
         row.innerHTML = `<div><b>${it.symbol}</b></div>
           <div>Level: <span class="mono">${it.level}</span></div>
-          <div>Time: <span class="mono">${new Date(it.timeSec*1000).toLocaleTimeString('en-US',{hour12:false})} NY</span></div>`;
+          <div>Time: <span class="mono">${nyTime} NY</span></div>`;
         box.appendChild(row);
       });
     }
@@ -655,18 +656,25 @@
           { key: 'L.M.H', value: lv.lmh },
           { key: 'P.P.M.L', value: lv.ppml },
           { key: 'P.P.M.H', value: lv.ppmh },
-        ].filter(L => L.value != null).sort((a,b) => Number(b.value) - Number(a.value));
+        ].filter(L => L.value != null);
         for (const pt of next) {
           const isOrange = pt && pt.color === orange;
           if (!isOrange) continue;
           const ms = (pt.time || 0) * 1000;
           if (!isPostMarketNY(ms)) continue;
-          for (const L of levels) {
-            if (typeof pt.high === 'number' && pt.high >= L.value) {
-              alerts.push({ symbol: state.symbol, level: L.key, timeSec: pt.time });
-              break;
-            }
+          const low = pt.low, high = pt.high, open = pt.open, close = pt.close;
+          if (typeof low !== 'number' || typeof high !== 'number') continue;
+          const touched = levels.filter(L => typeof L.value === 'number' && low <= L.value && L.value <= high);
+          if (!touched.length) continue;
+          let chosen;
+          if (typeof open === 'number' && typeof close === 'number' && close < open) {
+            // Down move: choose lowest touched level (e.g., L.M.L)
+            chosen = touched.reduce((a, b) => (a.value <= b.value ? a : b));
+          } else {
+            // Up move or flat: choose highest touched level (e.g., L.M.H)
+            chosen = touched.reduce((a, b) => (a.value >= b.value ? a : b));
           }
+          alerts.push({ symbol: state.symbol, level: chosen.key, timeSec: pt.time });
         }
       }
       if (alerts.length) {
