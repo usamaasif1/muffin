@@ -567,9 +567,9 @@
     function renderAlerts(items) {
       const box = document.getElementById('alertsList'); if (!box) return;
       items.forEach(it => {
-        const key = `${it.symbol}|${it.level}|${it.timeSec}`;
-        if (state.seenAlerts.has(key)) return;
-        state.seenAlerts.add(key);
+        const symKey = (it.symbol || '').toUpperCase();
+        if (state.seenAlerts.has(symKey)) return;
+        state.seenAlerts.add(symKey);
         const row = document.createElement('div'); row.className = 'pm-item';
         row.innerHTML = `<div><b>${it.symbol}</b></div>
           <div>Level: <span class="mono">${it.level}</span></div>
