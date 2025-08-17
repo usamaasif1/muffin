@@ -204,15 +204,16 @@
     }
 
     async function fetchCandles(symbol) {
-      const url = apiUrl('candles', `symbol=${encodeURIComponent(symbol)}&timespan=${state.timespan}&window=${state.window}`);
+      const windowParam = (state.timespan === '1h' && state.window === 'max') ? '365d' : state.window;
+      const url = apiUrl('candles', `symbol=${encodeURIComponent(symbol)}&timespan=${state.timespan}&window=${windowParam}`);
       const resp = await fetch(url);
       if (!resp.ok) {
-        const txt = await resp.text().catch(()=>'');
-        if (txt.includes('429') || txt.includes('Too Many Requests')) {
+        if (resp.status === 429) {
           console.log('🚨 Rate limited (429), retrying in 3 seconds...');
           await new Promise(resolve => setTimeout(resolve, 3000));
           return await fetchCandles(symbol); // Retry once
         }
+        const txt = await resp.text().catch(()=> '');
         throw new Error('Failed to get candles: ' + txt);
       }
       const data = await resp.json();

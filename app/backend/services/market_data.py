@@ -286,6 +286,8 @@ def _fetch_candles_alpaca(
         if page_token:
             q["page_token"] = page_token
         resp = requests.get(base_url, headers=headers, params=q, timeout=30)
+        if resp.status_code == 429:
+            raise MarketDataError("429: Too Many Requests (Alpaca)")
         resp.raise_for_status()
         data = resp.json() or {}
         bars = data.get("bars") or []
@@ -318,6 +320,7 @@ def _fetch_candles_alpaca(
             break
 
     return candles
+
 
 def _fetch_candles_yahoo(symbol: str, timespan: Timespan, window: str) -> List[Candle]:
     interval, rng = _yahoo_interval_and_range(timespan, window)
