@@ -938,7 +938,7 @@
       const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute:'2-digit', hour12:false });
       const [hh, mm] = fmt.format(new Date(ms)).split(':').map(Number);
       const mins = hh*60 + mm;
-      return mins > 16 && mins <= 20; // 16:01 - 20:00 NY
+      return mins > 16*60 && mins <= 20*60; // 16:01 - 20:00 NY
     }
     function computePostMarketHigh(seriesData) {
       if (!seriesData || !seriesData.length) return null;
