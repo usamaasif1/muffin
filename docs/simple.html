@@ -26,6 +26,11 @@
     .watch-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border: 1px solid #374151; border-radius: 8px; cursor: pointer; }
     .watch-item .rm { margin-left: 10px; color: #fca5a5; cursor: pointer; }
     #chart { width: 100%; height: calc(100vh - 54px); position: relative; }
+    /* Session shading overlay */
+    #sessionShades { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+    .session-shade { position: absolute; top: 0; height: 100%; pointer-events: none; }
+    .session-shade.pre { background: rgba(59, 130, 246, 0.08); }
+    .session-shade.post { background: rgba(244, 63, 94, 0.08); }
     #msg { padding: 6px 12px; color: #fca5a5; font-size: 13px; white-space: pre-wrap; }
     #topbar { display:flex; gap:10px; align-items:center; }
     #search { width: 320px; padding: 8px 10px; border-radius: 8px; border: 1px solid #374151; background: #0a0f20; color: #e5e7eb; }
@@ -91,7 +96,7 @@
         <div class="small" style="color:#94a3b8;margin-bottom:6px;">Watchlist</div>
         <div id="watch"></div>
       </aside>
-      <div id="chart"></div>
+      <div id="chart"><div id="sessionShades"></div></div>
       <!-- New right-side panel with tabs: keeps chart centered and is extensible -->
       <aside id="rightPanel">
         <div id="tabBar">
@@ -849,6 +854,10 @@
 
          // Apply highlights/alerts for the new symbol (1h only)
          await applyPmHighlights(state.symbol)
+
+         // Draw session shading (pre/post)
+         drawSessionShades();
+         state.chart.timeScale().subscribeVisibleLogicalRangeChange(drawSessionShades);
  
          // Evaluate post-market strategy if enabled
          // if (pmState.enabled) evaluatePostMarketStrategy(); // Removed PM state
@@ -918,6 +927,8 @@
         // Re-apply highlights for current timeframe
         await applyPmHighlights(state.symbol);
         setupHoverInfoOnce();
+        // Redraw session shading after timeframe changes
+        drawSessionShades();
       });
     });
 
@@ -926,7 +937,7 @@
       const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute:'2-digit', hour12:false });
       const [hh, mm] = fmt.format(new Date(ms)).split(':').map(Number);
       const mins = hh*60 + mm;
-      return mins > 16*60 && mins <= 20*60; // 16:01 - 20:00 NY
+      return mins > 16 && mins <= 20; // 16:01 - 20:00 NY
     }
     function computePostMarketHigh(seriesData) {
       if (!seriesData || !seriesData.length) return null;
@@ -964,6 +975,77 @@
       const gain = ((last.close - pmOpen) / pmOpen) * 100;
       const triggered = gain >= 20; // Changed from pmState.targetPct to 20
       document.getElementById('pmSignalValue').textContent = triggered ? `Buy Signal Triggered at $${last.close.toFixed(2)}` : 'No Signal';
+    }
+
+    // Session shading utils (NY time)
+    function nyHhMm(ms) {
+      const d = new Date(ms);
+      const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false });
+      const [hh, mm] = fmt.format(d).split(':').map(Number);
+      return { hh, mm };
+    }
+    function isPreMarketNY(ms) {
+      const { hh, mm } = nyHhMm(ms); const mins = hh * 60 + mm; return mins >= 4 * 60 && mins < 9 * 60 + 30;
+    }
+    function isRegularNY(ms) {
+      const { hh, mm } = nyHhMm(ms); const mins = hh * 60 + mm; return mins >= 9 * 60 + 30 && mins < 16 * 60;
+    }
+    function isPostMarketNY(ms) {
+      const { hh, mm } = nyHhMm(ms); const mins = hh * 60 + mm; return mins >= 16 * 60 && mins < 20 * 60;
+    }
+
+    function clearSessionShades() {
+      const layer = document.getElementById('sessionShades'); if (!layer) return;
+      layer.innerHTML = '';
+    }
+
+    function drawSessionShades() {
+      const layer = document.getElementById('sessionShades'); if (!layer || !state.chart || !state.series) return;
+      layer.innerHTML = '';
+      const data = state.series.data(); if (!Array.isArray(data) || !data.length) return;
+      const timeScale = state.chart.timeScale();
+      const width = layer.clientWidth;
+
+      const visible = timeScale.getVisibleLogicalRange();
+      if (!visible || visible.from == null || visible.to == null) return;
+
+      const priceToX = (logical) => {
+        const x = timeScale.logicalToCoordinate(logical);
+        return typeof x === 'number' ? x : null;
+      };
+
+      // Group contiguous bars per day into pre/post segments
+      const segments = [];
+      let current = null;
+      for (let i = Math.floor(visible.from) - 2; i <= Math.ceil(visible.to) + 2; i++) {
+        const bar = state.series.dataByIndex ? state.series.dataByIndex(i) : null;
+        if (!bar || typeof bar.time !== 'number') continue;
+        const ms = bar.time * 1000;
+        const typ = isPreMarketNY(ms) ? 'pre' : isPostMarketNY(ms) ? 'post' : 'none';
+        if (typ === 'none') { current = null; continue; }
+        if (!current || current.typ !== typ) {
+          current = { typ, startIdx: i, endIdx: i };
+          segments.push(current);
+        } else {
+          current.endIdx = i;
+        }
+      }
+
+      // Render segments as absolute divs
+      segments.forEach(seg => {
+        const x1 = priceToX(seg.startIdx);
+        const x2 = priceToX(seg.endIdx + 1);
+        if (x1 == null || x2 == null) return;
+        const left = Math.max(0, Math.min(x1, x2));
+        const right = Math.max(x1, x2);
+        const widthPx = Math.max(0, right - left);
+        if (widthPx <= 0) return;
+        const div = document.createElement('div');
+        div.className = `session-shade ${seg.typ}`;
+        div.style.left = `${left}px`;
+        div.style.width = `${widthPx}px`;
+        layer.appendChild(div);
+      });
     }
 
     window.addEventListener('DOMContentLoaded', () => {
