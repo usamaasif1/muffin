@@ -684,13 +684,21 @@
 
     function drawLevelLines(lv) {
       clearLevelLines();
-      if (lv) {
-        // L.M.* dotted (1), P.P.M.* dashed (2)
-        if (lv.lml != null) state.levelLines.push(state.series.createPriceLine({ price: lv.lml, color: '#94a3b8', lineWidth: 1, lineStyle: 1, axisLabelVisible: true, title: 'L.M.L' }));
-        if (lv.lmh != null) state.levelLines.push(state.series.createPriceLine({ price: lv.lmh, color: '#94a3b8', lineWidth: 1, lineStyle: 1, axisLabelVisible: true, title: 'L.M.H' }));
-        if (lv.ppml != null) state.levelLines.push(state.series.createPriceLine({ price: lv.ppml, color: '#38bdf8', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'P.P.M.L' }));
-        if (lv.ppmh != null) state.levelLines.push(state.series.createPriceLine({ price: lv.ppmh, color: '#38bdf8', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'P.P.M.H' }));
-      }
+      if (!lv) return;
+      const defs = [];
+      if (lv.lml != null) defs.push({ price: lv.lml, color: '#94a3b8', style: 1, title: 'L.M.L' });
+      if (lv.lmh != null) defs.push({ price: lv.lmh, color: '#94a3b8', style: 1, title: 'L.M.H' });
+      if (lv.ppml != null) defs.push({ price: lv.ppml, color: '#38bdf8', style: 2, title: 'P.P.M.L' });
+      if (lv.ppmh != null) defs.push({ price: lv.ppmh, color: '#38bdf8', style: 2, title: 'P.P.M.H' });
+      const epsilon = 1e-6;
+      const added = [];
+      defs.forEach(d => {
+        const exists = added.some(p => Math.abs(p - d.price) < epsilon);
+        if (exists) return;
+        const pl = state.series.createPriceLine({ price: d.price, color: d.color, lineWidth: 1, lineStyle: d.style, axisLabelVisible: true, title: d.title });
+        state.levelLines.push(pl);
+        added.push(d.price);
+      });
     }
 
     async function computeAndRenderBtLevels(histCandlesOptional) {

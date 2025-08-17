@@ -260,14 +260,19 @@
     function setLevelLines(levels) {
       clearPriceLines();
       if (!levels || !candleSeries) return;
-      const add = (price, color, title) => {
-        const pl = candleSeries.createPriceLine({ price, color, lineWidth: 1, lineStyle: 1, axisLabelVisible: true, title });
+      const epsilon = 1e-6;
+      const added = [];
+      const add = (price, color, title, style = 1) => {
+        if (price == null) return;
+        if (added.some(p => Math.abs(p - price) < epsilon)) return;
+        const pl = candleSeries.createPriceLine({ price, color, lineWidth: 1, lineStyle: style, axisLabelVisible: true, title });
         state.priceLines.push(pl);
+        added.push(price);
       };
-      add(levels.lml, '#94a3b8', 'L.M.L');
-      add(levels.lmh, '#94a3b8', 'L.M.H');
-      if (levels.ppml != null) add(levels.ppml, '#38bdf8', 'P.P.M.L');
-      if (levels.ppmh != null) add(levels.ppmh, '#38bdf8', 'P.P.M.H');
+      add(levels.lml, '#94a3b8', 'L.M.L', 1);
+      add(levels.lmh, '#94a3b8', 'L.M.H', 1);
+      add(levels.ppml, '#38bdf8', 'P.P.M.L', 2);
+      add(levels.ppmh, '#38bdf8', 'P.P.M.H', 2);
     }
 
     function filterSession(candles) {
