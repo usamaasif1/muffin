@@ -32,6 +32,15 @@ def _get_polygon_key(explicit_key: Optional[str] = None) -> Optional[str]:
     return os.environ.get("POLYGON_API_KEY")
 
 
+def _get_alpaca_keys(
+    explicit_key_id: Optional[str] = None,
+    explicit_secret: Optional[str] = None,
+) -> Tuple[Optional[str], Optional[str]]:
+    key_id = explicit_key_id or os.environ.get("ALPACA_API_KEY_ID")
+    secret = explicit_secret or os.environ.get("ALPACA_API_SECRET_KEY")
+    return key_id, secret
+
+
 def _to_iso8601(date: dt.datetime) -> str:
     return date.replace(microsecond=0).isoformat() + "Z"
 
@@ -71,6 +80,23 @@ def _polygon_timespan(timespan: Timespan) -> Tuple[int, str]:
     raise ValueError("Unsupported timespan")
 
 
+def _alpaca_timeframe(timespan: Timespan) -> str:
+    # Alpaca timeframes: 1Min,5Min,15Min,1Hour,1Day,1Month
+    if timespan == "1m":
+        return "1Min"
+    if timespan == "5m":
+        return "5Min"
+    if timespan == "15m":
+        return "15Min"
+    if timespan == "1h":
+        return "1Hour"
+    if timespan == "day":
+        return "1Day"
+    if timespan == "month":
+        return "1Month"
+    raise ValueError("Unsupported timespan")
+
+
 def _yahoo_interval_and_range(timespan: Timespan, window: str) -> Tuple[str, str]:
     # Yahoo finance intervals: 1m,2m,5m,15m,30m,60m,90m,1d,5d,1wk,1mo,3mo
     if timespan == "1m":
@@ -95,9 +121,13 @@ def fetch_candles(
     window: str = "5d",
     polygon_key: Optional[str] = None,
 ) -> List[Candle]:
+    # Prefer Alpaca if configured
+    alpaca_key_id, alpaca_secret = _get_alpaca_keys()
+    if alpaca_key_id and alpaca_secret:
+        return _fetch_candles_alpaca(symbol, timespan, window, alpaca_key_id, alpaca_secret)
+    # Next, try Polygon if key is provided (explicit or env)
     key = _get_polygon_key(polygon_key)
     if key:
-        # With a key, do NOT fall back to Yahoo. Bubble up Polygon errors.
         return _fetch_candles_polygon(symbol, timespan, window, key)
     # No key available: best-effort Yahoo fallback
     return _fetch_candles_yahoo(symbol, timespan, window)
@@ -204,6 +234,90 @@ def _fetch_candles_polygon(symbol: str, timespan: Timespan, window: str, key: st
     # If all attempts exhausted
     raise MarketDataError("Polygon rate limit (429). Reduce range or try a higher timespan.")
 
+
+def _fetch_candles_alpaca(
+    symbol: str,
+    timespan: Timespan,
+    window: str,
+    key_id: str,
+    secret: str,
+) -> List[Candle]:
+    """Fetch candles from Alpaca Market Data v2.
+
+    Uses single-symbol endpoint with pagination via next_page_token.
+    """
+    now = dt.datetime.utcnow().replace(microsecond=0)
+    # Map 'max' to conservative ranges similar to Polygon code above
+    if window == "max":
+        if timespan == "1m":
+            delta = dt.timedelta(days=7)
+        elif timespan == "5m":
+            delta = dt.timedelta(days=30)
+        elif timespan == "15m":
+            delta = dt.timedelta(days=60)
+        elif timespan == "1h":
+            delta = dt.timedelta(days=365)
+        elif timespan == "day":
+            delta = dt.timedelta(days=365 * 20)
+        else:  # month
+            delta = dt.timedelta(days=365 * 30)
+    else:
+        delta = _parse_window(window)
+
+    start = now - delta
+    tf = _alpaca_timeframe(timespan)
+    base_url = f"https://data.alpaca.markets/v2/stocks/{symbol.upper()}/bars"
+    headers = {
+        "APCA-API-KEY-ID": key_id,
+        "APCA-API-SECRET-KEY": secret,
+    }
+    params: Dict[str, str] = {
+        "timeframe": tf,
+        "start": start.replace(microsecond=0).isoformat() + "Z",
+        "end": now.replace(microsecond=0).isoformat() + "Z",
+        "adjustment": "all",
+        "limit": "10000",
+    }
+
+    candles: List[Candle] = []
+    page_token: Optional[str] = None
+    while True:
+        q = params.copy()
+        if page_token:
+            q["page_token"] = page_token
+        resp = requests.get(base_url, headers=headers, params=q, timeout=30)
+        resp.raise_for_status()
+        data = resp.json() or {}
+        bars = data.get("bars") or []
+        for b in bars:
+            t_iso = b.get("t")
+            # Parse RFC3339 timestamp to epoch ms
+            try:
+                # Support trailing Z
+                if isinstance(t_iso, str):
+                    dt_utc = dt.datetime.fromisoformat(t_iso.replace("Z", "+00:00"))
+                    t_ms = int(dt_utc.timestamp() * 1000)
+                else:
+                    t_ms = 0
+            except Exception:
+                t_ms = 0
+            if not t_ms:
+                continue
+            candles.append(
+                Candle(
+                    t=t_ms,
+                    o=float(b.get("o", 0.0)),
+                    h=float(b.get("h", 0.0)),
+                    l=float(b.get("l", 0.0)),
+                    c=float(b.get("c", 0.0)),
+                    v=float(b.get("v", 0.0)),
+                )
+            )
+        page_token = data.get("next_page_token") or data.get("nextPageToken")
+        if not page_token:
+            break
+
+    return candles
 
 def _fetch_candles_yahoo(symbol: str, timespan: Timespan, window: str) -> List[Candle]:
     interval, rng = _yahoo_interval_and_range(timespan, window)

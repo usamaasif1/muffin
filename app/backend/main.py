@@ -87,6 +87,7 @@ async def api_candles(
     x_api_key: Optional[str] = Header(default=None),
 ) -> dict:
     try:
+        # x_api_key remains for Polygon compatibility; Alpaca is read from env
         bars = fetch_candles(symbol=symbol, timespan=timespan, window=window, polygon_key=x_api_key)
         return {
             "symbol": symbol.upper(),

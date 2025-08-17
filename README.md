@@ -41,3 +41,13 @@ I’m building it iteratively—below is the feature matrix.
 
 > **Collaboration welcome!**  
 > Feel free to open issues or PRs for any box that isn’t green yet. I’m keeping it framework-free on purpose—vanilla JS, FastAPI, and small focused modules.
+
+### Data sources
+
+Priority order for market data:
+
+1. Alpaca (if `ALPACA_API_KEY_ID` and `ALPACA_API_SECRET_KEY` are set)
+2. Polygon (if `POLYGON_API_KEY` is set or request header `X-API-KEY` provided)
+3. Yahoo Finance fallback (no keys required)
+
+Place secrets in a `.env` file or your deployment environment.
