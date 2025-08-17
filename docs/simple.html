@@ -204,7 +204,7 @@
     }
 
     async function fetchCandles(symbol) {
-      const windowParam = (state.timespan === '1h' && state.window === 'max') ? '365d' : state.window;
+      const windowParam = (state.timespan === '1h' && state.window === 'max') ? '180d' : state.window;
       const url = apiUrl('candles', `symbol=${encodeURIComponent(symbol)}&timespan=${state.timespan}&window=${windowParam}`);
       const resp = await fetch(url);
       if (!resp.ok) {

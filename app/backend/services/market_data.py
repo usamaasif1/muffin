@@ -323,7 +323,15 @@ def _fetch_candles_alpaca(
 
 
 def _fetch_candles_yahoo(symbol: str, timespan: Timespan, window: str) -> List[Candle]:
-    interval, rng = _yahoo_interval_and_range(timespan, window)
+    # Reduce aggressive ranges to avoid Yahoo throttling on free tier
+    if window == "365d" and timespan == "1h":
+        rng = "180d"
+    else:
+        interval, rng = _yahoo_interval_and_range(timespan, window)
+        # keep computed rng
+        # normalize if very large hourly range requested
+        if timespan == "1h" and rng == "max":
+            rng = "180d"
     url = (
         f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={interval}&range={rng}&includePrePost=true"
     )
