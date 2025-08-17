@@ -393,8 +393,9 @@
     }
 
     function clearLevelLines() {
-      state.levelLines.forEach(line => {
-        if (line && line.remove) line.remove();
+      if (!state.series) { state.levelLines = []; return; }
+      (state.levelLines || []).forEach(line => {
+        try { state.series.removePriceLine(line); } catch (e) {}
       });
       state.levelLines = [];
     }
@@ -406,13 +407,15 @@
       
       if (!state.chart || !levels) return;
       
-      // Check if we already have the same levels drawn
-      if (state.lastDrawnLevels && 
-          state.lastDrawnLevels.lml === levels.lml &&
-          state.lastDrawnLevels.lmh === levels.lmh &&
-          state.lastDrawnLevels.ppml === levels.ppml &&
-          state.lastDrawnLevels.ppmh === levels.ppmh) {
-        console.log('🚨 Levels already drawn, skipping duplicate draw');
+      // Check if we already have the same levels drawn (tolerant to float jitter)
+      const eps = 1e-6;
+      const near = (a, b) => (a == null && b == null) || (a != null && b != null && Math.abs(a - b) < eps);
+      if (state.lastDrawnLevels &&
+          near(state.lastDrawnLevels.lml, levels.lml) &&
+          near(state.lastDrawnLevels.lmh, levels.lmh) &&
+          near(state.lastDrawnLevels.ppml, levels.ppml) &&
+          near(state.lastDrawnLevels.ppmh, levels.ppmh)) {
+        console.log('🚨 Levels already drawn (near-equal), skipping duplicate draw');
         return;
       }
       
