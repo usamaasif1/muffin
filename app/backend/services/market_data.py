@@ -311,10 +311,12 @@ def _fetch_candles_alpaca(
         "end": now.replace(microsecond=0).isoformat() + "Z",
         "adjustment": "all",
         "limit": "10000",
+        "feed": os.environ.get("ALPACA_DATA_FEED", "iex"),
     }
 
     candles: List[Candle] = []
     page_token: Optional[str] = None
+    page_count = 0
     while True:
         q = params.copy()
         if page_token:
@@ -322,6 +324,8 @@ def _fetch_candles_alpaca(
         resp = requests.get(base_url, headers=headers, params=q, timeout=30)
         if resp.status_code == 429:
             raise MarketDataError("429: Too Many Requests (Alpaca)")
+        if resp.status_code == 403:
+            raise MarketDataError("403: Forbidden (Alpaca) — set ALPACA_DATA_FEED=iex and verify plan/API keys")
         resp.raise_for_status()
         data = resp.json() or {}
         bars = data.get("bars") or []
@@ -350,9 +354,14 @@ def _fetch_candles_alpaca(
                 )
             )
         page_token = data.get("next_page_token") or data.get("nextPageToken")
+        page_count += 1
         if not page_token:
             break
 
+    try:
+        print(f"[candles] provider=alpaca sym={symbol.upper()} tf={timespan} pages={page_count}")
+    except Exception:
+        pass
     return candles
 
 
