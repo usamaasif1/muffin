@@ -89,10 +89,13 @@ async def api_candles(
     try:
         # x_api_key remains for Polygon compatibility; Alpaca is read from env
         bars = fetch_candles(symbol=symbol, timespan=timespan, window=window, polygon_key=x_api_key)
+        # detect data source
+        src = "alpaca" if (os.environ.get("ALPACA_API_KEY_ID") and os.environ.get("ALPACA_API_SECRET_KEY")) else ("polygon" if (x_api_key or os.environ.get("POLYGON_API_KEY")) else "yahoo")
         return {
             "symbol": symbol.upper(),
             "timespan": timespan,
             "window": window,
+            "source": src,
             "candles": [c.__dict__ for c in bars],
         }
     except Exception as exc:

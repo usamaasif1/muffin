@@ -290,7 +290,7 @@ def _fetch_candles_alpaca(
         elif timespan == "15m":
             delta = dt.timedelta(days=60)
         elif timespan == "1h":
-            delta = dt.timedelta(days=365)
+            delta = dt.timedelta(days=180)
         elif timespan == "day":
             delta = dt.timedelta(days=365 * 20)
         else:  # month
