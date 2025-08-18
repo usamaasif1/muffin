@@ -19,6 +19,7 @@ from backend.services.market_data import (
     Timespan,
     fetch_candles,
     fetch_candles_alpaca_public,
+    fetch_candles_yahoo_public,
     MarketDataError,
 )
 
@@ -133,6 +134,17 @@ async def api_candles(
     if use_alpaca:
         try:
             bars = fetch_candles_alpaca_public(symbol=symbol, timespan=timespan, window=window)
+            # If extended-hours desired, supplement with Yahoo for pre/post gaps
+            # Merge unique timestamps (prefer Alpaca values)
+            try:
+                yh = fetch_candles_yahoo_public(symbol=symbol, timespan=timespan, window=window)
+                a_idx = {c.t: c for c in bars}
+                for c in yh:
+                    if c.t not in a_idx:
+                        bars.append(c)
+                bars.sort(key=lambda c: c.t)
+            except Exception:
+                pass
             try:
                 print(f"[candles] provider=alpaca tf={timespan}")
             except Exception:

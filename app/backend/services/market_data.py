@@ -473,3 +473,8 @@ def _fetch_candles_yahoo(symbol: str, timespan: Timespan, window: str) -> List[C
             continue
         out.append(Candle(t=t_sec*1000, o=float(o), h=float(h), l=float(l), c=float(c), v=float(v or 0)))
     return out
+
+
+def fetch_candles_yahoo_public(symbol: str, timespan: Timespan, window: str) -> List[Candle]:
+    """Public wrapper to force Yahoo fetch (used to supplement extended-hours)."""
+    return _fetch_candles_yahoo(symbol, timespan, window)
