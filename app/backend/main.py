@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Optional, List
+import requests
 
 from fastapi import FastAPI, HTTPException, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,7 +19,6 @@ from backend.services.market_data import (
     Timespan,
     fetch_candles,
     fetch_candles_alpaca_public,
-    search_symbols,
 )
 
 # Load environment variables from .env if present (try repo root and app root)
@@ -33,6 +33,7 @@ for _env in _candidates:
         load_dotenv(dotenv_path=str(_env))
         break
 
+print(f"[boot] provider={('alpaca' if (os.environ.get('ALPACA_API_KEY_ID') and os.environ.get('ALPACA_API_SECRET_KEY')) else ('polygon' if os.environ.get('POLYGON_API_KEY') else 'yahoo'))} branch={os.environ.get('RENDER_GIT_BRANCH') or os.environ.get('GIT_BRANCH') or 'unknown'}")
 
 def _active_provider() -> str:
     if os.environ.get("ALPACA_API_KEY_ID") and os.environ.get("ALPACA_API_SECRET_KEY"):
@@ -97,7 +98,23 @@ async def read_github_file_endpoint(payload: ReadGithubRequest) -> dict:
 @app.get("/api/search")
 async def api_search(q: str = Query(..., min_length=1), x_api_key: Optional[str] = Header(default=None)) -> dict:
     try:
-        items = search_symbols(q, polygon_key=x_api_key)
+        # Try service search; if unavailable, fallback to Yahoo suggest
+        try:
+            from backend.services.market_data import search_symbols as _search_symbols
+            items = _search_symbols(q, polygon_key=x_api_key)
+        except Exception:
+            url = f"https://autoc.finance.yahoo.com/autoc?query={requests.utils.quote(q)}&region=1&lang=en"
+            headers = {"User-Agent": "Mozilla/5.0"}
+            resp = requests.get(url, headers=headers, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+            raw = ((data.get("ResultSet") or {}).get("Result") or [])[:10]
+            items = []
+            for itm in raw:
+                sym = itm.get("symbol") or ""
+                name = itm.get("name") or ""
+                if sym:
+                    items.append({"symbol": sym, "name": name})
         return {"items": items}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
