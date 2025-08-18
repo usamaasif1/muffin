@@ -19,6 +19,7 @@ from backend.services.market_data import (
     Timespan,
     fetch_candles,
     fetch_candles_alpaca_public,
+    MarketDataError,
 )
 
 # Load environment variables from .env if present (try repo root and app root)
@@ -127,14 +128,53 @@ async def api_candles(
     window: str = Query("5d"),
     x_api_key: Optional[str] = Header(default=None),
 ) -> dict:
+    use_alpaca = bool(os.environ.get("ALPACA_API_KEY_ID") and os.environ.get("ALPACA_API_SECRET_KEY"))
+    # Prefer Alpaca; gracefully fallback to existing provider on failure (e.g., 403)
+    if use_alpaca:
+        try:
+            bars = fetch_candles_alpaca_public(symbol=symbol, timespan=timespan, window=window)
+            try:
+                print(f"[candles] provider=alpaca tf={timespan}")
+            except Exception:
+                pass
+            return {
+                "symbol": symbol.upper(),
+                "timespan": timespan,
+                "window": window,
+                "source": "alpaca",
+                "candles": [c.__dict__ for c in bars],
+            }
+        except Exception as exc:
+            # Fallback path
+            try:
+                bars = fetch_candles(symbol=symbol, timespan=timespan, window=window, polygon_key=x_api_key)
+                src = "polygon" if (x_api_key or os.environ.get("POLYGON_API_KEY")) else "yahoo"
+                try:
+                    print(f"[candles] provider={src} tf={timespan} fallback=alpaca_error")
+                except Exception:
+                    pass
+                return {
+                    "symbol": symbol.upper(),
+                    "timespan": timespan,
+                    "window": window,
+                    "source": src,
+                    "candles": [c.__dict__ for c in bars],
+                }
+            except Exception as e2:
+                raise HTTPException(status_code=400, detail=str(exc)) from e2
+    # No Alpaca keys: use existing provider selection
     try:
-        # Force Alpaca for candles
-        bars = fetch_candles_alpaca_public(symbol=symbol, timespan=timespan, window=window)
+        bars = fetch_candles(symbol=symbol, timespan=timespan, window=window, polygon_key=x_api_key)
+        src = "polygon" if (x_api_key or os.environ.get("POLYGON_API_KEY")) else "yahoo"
+        try:
+            print(f"[candles] provider={src} tf={timespan}")
+        except Exception:
+            pass
         return {
             "symbol": symbol.upper(),
             "timespan": timespan,
             "window": window,
-            "source": "alpaca",
+            "source": src,
             "candles": [c.__dict__ for c in bars],
         }
     except Exception as exc:
