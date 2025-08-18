@@ -16,7 +16,6 @@ from backend.services.github_reader import read_github_file
 from backend.services.market_data import (
     Candle,
     Timespan,
-    compute_change_percent,
     fetch_candles,
     fetch_candles_alpaca_public,
     search_symbols,
@@ -33,6 +32,16 @@ for _env in _candidates:
     if _env.is_file():
         load_dotenv(dotenv_path=str(_env))
         break
+
+
+def compute_change_percent(candles: list[Candle], window: str) -> float | None:
+    if not candles:
+        return None
+    start = candles[0].o
+    end = candles[-1].c
+    if start == 0:
+        return None
+    return (end - start) / start * 100.0
 
 
 class ReadGithubRequest(BaseModel):
