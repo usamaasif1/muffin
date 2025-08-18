@@ -63,7 +63,13 @@ app.add_middleware(
 
 @app.get("/api/health")
 async def health() -> dict:
-    return {"status": "ok"}
+    provider = (
+        "alpaca" if (os.environ.get("ALPACA_API_KEY_ID") and os.environ.get("ALPACA_API_SECRET_KEY"))
+        else ("polygon" if os.environ.get("POLYGON_API_KEY") else "yahoo")
+    )
+    has_keys = bool(os.environ.get("ALPACA_API_KEY_ID") and os.environ.get("ALPACA_API_SECRET_KEY"))
+    branch = os.environ.get("RENDER_GIT_BRANCH") or os.environ.get("GIT_BRANCH") or "unknown"
+    return {"provider": provider, "hasKeys": has_keys, "branch": branch}
 
 
 @app.post("/api/read-github-file")
