@@ -34,6 +34,14 @@ for _env in _candidates:
         break
 
 
+def _active_provider() -> str:
+    if os.environ.get("ALPACA_API_KEY_ID") and os.environ.get("ALPACA_API_SECRET_KEY"):
+        return "alpaca"
+    if os.environ.get("POLYGON_API_KEY"):
+        return "polygon"
+    return "yahoo"
+
+
 def compute_change_percent(candles: list[Candle], window: str) -> float | None:
     if not candles:
         return None
