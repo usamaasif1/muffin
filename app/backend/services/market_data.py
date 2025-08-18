@@ -296,7 +296,19 @@ def _fetch_candles_alpaca(
         else:  # month
             delta = dt.timedelta(days=365 * 30)
     else:
+        # Parse requested window and cap by Alpaca free IEX sensible limits
         delta = _parse_window(window)
+        caps = {
+            "1m": dt.timedelta(days=7),
+            "5m": dt.timedelta(days=30),
+            "15m": dt.timedelta(days=60),
+            "1h": dt.timedelta(days=180),
+            "day": dt.timedelta(days=365 * 20),
+            "month": dt.timedelta(days=365 * 30),
+        }
+        cap = caps.get(timespan)
+        if cap and delta > cap:
+            delta = cap
 
     start = now - delta
     tf = _alpaca_timeframe(timespan)
