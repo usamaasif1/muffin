@@ -359,6 +359,63 @@ def _fetch_candles_alpaca(
 def _fetch_candles_yahoo(symbol: str, timespan: Timespan, window: str) -> List[Candle]:
     interval, rng = _yahoo_interval_and_range(timespan, window)
     rng = _cap_yahoo_range(timespan, rng)
+    # Chunk minute/hour intervals using period1/period2 to reduce 429s
+    if interval in ("1m", "5m", "15m", "60m"):
+        def range_to_days(r: str) -> int:
+            r = (r or '').lower()
+            if r.endswith('d'):
+                return max(0, int(r[:-1]))
+            if r.endswith('y'):
+                return max(0, int(r[:-1]) * 365)
+            return 0
+        chunk_days_map = {"1m": 3, "5m": 7, "15m": 14, "60m": 30}
+        total_days = range_to_days(rng) or chunk_days_map[interval]
+        end_dt = dt.datetime.utcnow().replace(microsecond=0)
+        start_dt = end_dt - dt.timedelta(days=total_days)
+        candles: List[Candle] = []
+        cur = start_dt
+        while cur < end_dt:
+            nxt = min(cur + dt.timedelta(days=chunk_days_map[interval]), end_dt)
+            url = (
+                f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+                f"?period1={int(cur.timestamp())}&period2={int(nxt.timestamp())}&interval={interval}&includePrePost=true"
+            )
+            resp = requests.get(url, timeout=30)
+            if resp.status_code == 429:
+                raise MarketDataError("429: Too Many Requests (Yahoo)")
+            resp.raise_for_status()
+            data = resp.json()
+            result = (data.get("chart") or {}).get("result")
+            if result:
+                res0 = result[0]
+                timestamps = res0.get("timestamp") or []
+                quotes = ((res0.get("indicators") or {}).get("quote") or [{}])[0]
+                opens = quotes.get("open") or []
+                highs = quotes.get("high") or []
+                lows = quotes.get("low") or []
+                closes = quotes.get("close") or []
+                volumes = quotes.get("volume") or []
+                for i in range(min(len(timestamps), len(opens), len(highs), len(lows), len(closes))):
+                    t_sec = int(timestamps[i])
+                    o = opens[i]; h = highs[i]; l = lows[i]; c = closes[i]
+                    v = volumes[i] if i < len(volumes) else 0
+                    if o is None or h is None or l is None or c is None:
+                        continue
+                    candles.append(Candle(t=t_sec*1000, o=float(o), h=float(h), l=float(l), c=float(c), v=float(v or 0)))
+            time.sleep(0.2)
+            cur = nxt
+        # Sort and dedup
+        candles.sort(key=lambda c: c.t)
+        dedup: List[Candle] = []
+        seen_t = set()
+        for c in candles:
+            if c.t in seen_t:
+                continue
+            seen_t.add(c.t)
+            dedup.append(c)
+        return dedup
+
+    # Single call fallback for daily/monthly
     url = (
         f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={interval}&range={rng}&includePrePost=true"
     )
@@ -372,70 +429,18 @@ def _fetch_candles_yahoo(symbol: str, timespan: Timespan, window: str) -> List[C
         raise MarketDataError("No chart data from Yahoo")
     res0 = result[0]
     timestamps = res0.get("timestamp") or []
-    indicators = res0.get("indicators", {})
-    quotes = (indicators.get("quote") or [{}])[0]
+    quotes = ((res0.get("indicators") or {}).get("quote") or [{}])[0]
     opens = quotes.get("open") or []
     highs = quotes.get("high") or []
     lows = quotes.get("low") or []
     closes = quotes.get("close") or []
     volumes = quotes.get("volume") or []
-    candles: List[Candle] = []
+    out: List[Candle] = []
     for i in range(min(len(timestamps), len(opens), len(highs), len(lows), len(closes))):
         t_sec = int(timestamps[i])
-        o = opens[i]
-        h = highs[i]
-        l = lows[i]
-        c = closes[i]
+        o = opens[i]; h = highs[i]; l = lows[i]; c = closes[i]
         v = volumes[i] if i < len(volumes) else 0
         if o is None or h is None or l is None or c is None:
             continue
-        candles.append(
-            Candle(
-                t=t_sec * 1000,
-                o=float(o),
-                h=float(h),
-                l=float(l),
-                c=float(c),
-                v=float(v or 0),
-            )
-        )
-    return candles
-
-
-def search_symbols(query: str, polygon_key: Optional[str] = None, limit: int = 10) -> List[Dict[str, str]]:
-    key = _get_polygon_key(polygon_key)
-    if key:
-        try:
-            url = f"https://api.polygon.io/v3/reference/tickers?search={requests.utils.quote(query)}&active=true&limit={limit}&apiKey={key}"
-            resp = requests.get(url, timeout=15)
-            resp.raise_for_status()
-            data = resp.json()
-            results = data.get("results") or []
-            return [{"symbol": r.get("ticker", ""), "name": r.get("name", "")} for r in results]
-        except Exception:
-            pass
-    # Yahoo suggest fallback
-    url = f"https://autoc.finance.yahoo.com/autoc?query={requests.utils.quote(query)}&region=1&lang=en"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    resp = requests.get(url, headers=headers, timeout=15)
-    resp.raise_for_status()
-    data = resp.json()
-    items = ((data.get("ResultSet") or {}).get("Result") or [])[:limit]
-    out: List[Dict[str, str]] = []
-    for itm in items:
-        sym = itm.get("symbol") or ""
-        name = itm.get("name") or ""
-        if sym:
-            out.append({"symbol": sym, "name": name})
+        out.append(Candle(t=t_sec*1000, o=float(o), h=float(h), l=float(l), c=float(c), v=float(v or 0)))
     return out
-
-
-def compute_change_percent(candles: List[Candle], window: str) -> Optional[float]:
-    if not candles:
-        return None
-    # simple: compare last close to first open in returned window
-    start = candles[0].o
-    end = candles[-1].c
-    if start == 0:
-        return None
-    return (end - start) / start * 100.0
