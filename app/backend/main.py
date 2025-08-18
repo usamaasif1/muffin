@@ -63,10 +63,18 @@ class ReadGithubRequest(BaseModel):
 app = FastAPI(title="Muffin App")
 
 # CORS: safe defaults; since we serve the frontend from the same server, this is mostly redundant
+_cors_origins = [
+    "https://usamaasif1.github.io",
+    "https://muffin-64tv.onrender.com",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://localhost:8000",
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_origin_regex=r"https://.*\\.github\\.io$",
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
