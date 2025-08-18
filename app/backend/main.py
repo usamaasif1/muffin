@@ -18,6 +18,7 @@ from backend.services.market_data import (
     Timespan,
     compute_change_percent,
     fetch_candles,
+    fetch_candles_alpaca_public,
     search_symbols,
 )
 
@@ -87,15 +88,13 @@ async def api_candles(
     x_api_key: Optional[str] = Header(default=None),
 ) -> dict:
     try:
-        # x_api_key remains for Polygon compatibility; Alpaca is read from env
-        bars = fetch_candles(symbol=symbol, timespan=timespan, window=window, polygon_key=x_api_key)
-        # detect data source
-        src = "alpaca" if (os.environ.get("ALPACA_API_KEY_ID") and os.environ.get("ALPACA_API_SECRET_KEY")) else ("polygon" if (x_api_key or os.environ.get("POLYGON_API_KEY")) else "yahoo")
+        # Force Alpaca for candles
+        bars = fetch_candles_alpaca_public(symbol=symbol, timespan=timespan, window=window)
         return {
             "symbol": symbol.upper(),
             "timespan": timespan,
             "window": window,
-            "source": src,
+            "source": "alpaca",
             "candles": [c.__dict__ for c in bars],
         }
     except Exception as exc:

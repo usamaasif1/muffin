@@ -356,6 +356,14 @@ def _fetch_candles_alpaca(
     return candles
 
 
+def fetch_candles_alpaca_public(symbol: str, timespan: Timespan, window: str) -> List[Candle]:
+    """Public wrapper to fetch Alpaca candles using env vars, raising if missing."""
+    key_id, secret = _get_alpaca_keys()
+    if not key_id or not secret:
+        raise MarketDataError("Alpaca credentials not configured")
+    return _fetch_candles_alpaca(symbol, timespan, window, key_id, secret)
+
+
 def _fetch_candles_yahoo(symbol: str, timespan: Timespan, window: str) -> List[Candle]:
     interval, rng = _yahoo_interval_and_range(timespan, window)
     rng = _cap_yahoo_range(timespan, rng)
