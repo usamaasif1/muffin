@@ -1,11 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Muffin • Simple</title>
+  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
   <style>
     html, body { height: 100%; margin: 0; background: #0b1022; color: #e5e7eb; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto; }
     #wrap { display: flex; flex-direction: column; height: 100%; }
     header { padding: 10px 14px; border-bottom: 1px solid #1f2937; background: #0f172a; }
-    /* Layout: left watchlist (200px) • centered chart (1fr) • right tabs (240px) */
-    main { flex: 1; display: grid; grid-template-columns: 200px 1fr 240px; transition: grid-template-columns 0.2s ease; }
-    /* Collapsible panels */
-    .collapsed-left main { grid-template-columns: 0 1fr 240px; }
+    main { flex: 1; display: grid; grid-template-columns: 200px 1fr 280px; transition: grid-template-columns 0.2s ease; }
+    .collapsed-left main { grid-template-columns: 0 1fr 280px; }
     .collapsed-left #sidebar { display: none; }
     .collapsed-right main { grid-template-columns: 200px 1fr 0; }
     .collapsed-right #rightPanel { display: none; }
@@ -14,55 +19,94 @@
     #watch { display: flex; flex-direction: column; gap: 6px; }
     .watch-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border: 1px solid #374151; border-radius: 8px; cursor: pointer; }
     .watch-item .rm { margin-left: 10px; color: #fca5a5; cursor: pointer; }
-    #chart { width: 100%; height: calc(100vh - 54px); position: relative; }
-    /* Session shading overlay */
-    #sessionShades { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
-    .session-shade { position: absolute; top: 0; height: 100%; pointer-events: none; }
-    .session-shade.pre { background: rgba(59, 130, 246, 0.08); }
-    .session-shade.post { background: rgba(244, 63, 94, 0.08); }
-    #sessionShades { z-index: 100; }
-    #msg { padding: 6px 12px; color: #fca5a5; font-size: 13px; white-space: pre-wrap; }
+    #chart { width: 100%; height: calc(100vh - 54px); }
+    #rightPanel { border-left: 1px solid #1f2937; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+    .panel-title { color: #94a3b8; font-size: 12px; margin-bottom: 6px; }
+    .level-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; }
+    .level-left { display: flex; align-items: center; gap: 8px; }
+    .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+    .swatch-grey { background: #94a3b8; }
+    .swatch-blue { background: #38bdf8; }
+    #msg { padding: 6px 12px; color: #fca5a5; font-size: 13px; }
     #topbar { display:flex; gap:10px; align-items:center; }
     #search { width: 320px; padding: 8px 10px; border-radius: 8px; border: 1px solid #374151; background: #0a0f20; color: #e5e7eb; }
-    #go { padding: 8px 12px; border-radius: 8px; border: 1px solid #374151; background: #2563eb; color: white; cursor: pointer; }
-    #add { padding: 8px 12px; border-radius: 8px; border: 1px solid #374151; background: #10b981; color: white; cursor: pointer; }
-    /* Right-side tabs scaffold (extensible for future tabs) */
-    #rightPanel { border-left: 1px solid #1f2937; padding: 10px; }
-    #tabBar { display: flex; gap: 6px; margin-bottom: 10px; }
-    .tab-btn { padding: 6px 8px; border: 1px solid #374151; border-radius: 6px; background: #0a0f20; color: #e5e7eb; cursor: pointer; }
-    .tab-btn.active { background: #1f2937; }
-    .panel-title { font-size: 12px; color: #94a3b8; margin-bottom: 6px; }
-    .levels { display: grid; gap: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas; font-size: 12px; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas; }
-    /* Alerts list items with status light */
-    #alertsList { display: flex; flex-direction: column; gap: 6px; }
-    .alert-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid #374151; border-radius: 6px; background: #0a0f20; }
-    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #f59e0b; box-shadow: 0 0 6px rgba(245, 158, 11, 0.7); flex: 0 0 auto; }
-    /* Levels panel now lives in the right panel (not fixed overlay) */
-    #levelsPanel { display: none; background: #0f172a; border: 1px solid #374151; border-radius: 8px; padding: 16px; }
-    .level-item { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px; }
-    .level-item:last-child { margin-bottom: 0; }
-    .level-label { color: #94a3b8; }
-    .level-value { color: #e5e7eb; font-weight: 500; }
-    .level-line { 
-      position: absolute; 
-      height: 3px; 
-      width: 100%; 
-      opacity: 0.9; 
-      z-index: 1000;
-      pointer-events: none;
-    }
-    .level-line.lml { background: #60a5fa; }
-    .level-line.lmh { background: #10b981; }
-    .level-line.ppml { background: #f59e0b; }
-    .level-line.ppmh { background: #ef4444; }
-    /* PM UI removed */
-    /* Hover info panel like TradingView */
-    .hover-info { position: absolute; top: 6px; left: 6px; background: rgba(15,23,42,0.9); border: 1px solid #374151; border-radius: 6px; padding: 6px 8px; font-size: 12px; color: #e5e7eb; pointer-events: none; display: none; z-index: 2000; }
-    .pos { color: #10b981; }
-    .neg { color: #ef4444; }
-    /* Minimal styles for alerts/watchlist */
-    .panel-title { color: #94a3b8; font-size: 12px; margin: 6px 0; }
-    .pm-item { border: 1px solid #374151; border-radius: 6px; padding: 8px; background: #0a0f20; font-size: 12px; margin-bottom: 6px; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas; }
+    #go, .tf, #add, #toggleLeft, #toggleRight { padding: 8px 12px; border-radius: 8px; border: 1px solid #374151; background: #0a0f20; color: #e5e7eb; cursor: pointer; }
   </style>
+</head>
+<body>
+  <div id="wrap">
+    <header>
+      <div id="topbar">
+        <div id="title">AAPL • 15m</div>
+        <input id="search" list="symbols" placeholder="Search ticker (AAPL, TSLA, apple)" />
+        <datalist id="symbols"></datalist>
+        <button id="go">Go</button>
+        <button id="toggleLeft" title="Toggle watchlist">⟷ Watch</button>
+        <button id="toggleRight" title="Toggle side panel">⟷ Panel</button>
+        <div style="margin-left:auto; display:flex; gap:6px;">
+          <button class="tf" data-tf="1m">1m</button>
+          <button class="tf" data-tf="5m">5m</button>
+          <button class="tf" data-tf="15m">15m</button>
+          <button class="tf" data-tf="1h">1h</button>
+          <button class="tf" data-tf="day">1d</button>
+          <button class="tf" data-tf="month">1mo</button>
+          <button id="add">+ Add</button>
+        </div>
+      </div>
+    </header>
+    <div id="msg"></div>
+    <main>
+      <aside id="sidebar">
+        <div class="small" style="color:#94a3b8;margin-bottom:6px;">Watchlist</div>
+        <div id="watch"></div>
+      </aside>
+      <div id="chart"></div>
+      <aside id="rightPanel">
+        <div class="panel-title">Levels</div>
+        <div id="levelsBox" style="border: 1px solid #374151; border-radius: 8px; padding: 10px; background: #0a0f20;">
+          <div class="level-row"><div class="level-left"><span class="swatch swatch-grey"></span><span>L.M.L</span></div><div id="live_lvl_lml">—</div></div>
+          <div class="level-row"><div class="level-left"><span class="swatch swatch-grey"></span><span>L.M.H</span></div><div id="live_lvl_lmh">—</div></div>
+          <div class="level-row"><div class="level-left"><span class="swatch swatch-blue"></span><span>P.P.M.L</span></div><div id="live_lvl_ppml">—</div></div>
+          <div class="level-row"><div class="level-left"><span class="swatch swatch-blue"></span><span>P.P.M.H</span></div><div id="live_lvl_ppmh">—</div></div>
+        </div>
+      </aside>
+    </main>
+  </div>
+  <script>
+    // Basic chart init
+    let chartApi, candleSeries;
+    async function ensureChart() {
+      if (chartApi && candleSeries) return;
+      chartApi = window.LightweightCharts.createChart(document.getElementById('chart'), {
+        layout: { background: { color: '#0b1022' }, textColor: '#e5e7eb' },
+        rightPriceScale: { borderColor: '#1f2937' },
+        timeScale: { borderColor: '#1f2937', timeVisible: true, secondsVisible: false },
+        grid: { vertLines: { color: '#111827' }, horzLines: { color: '#111827' } }
+      });
+      candleSeries = chartApi.addCandlestickSeries({ upColor: '#0ec07f', downColor: '#ff4d4f', borderDownColor: '#ff4d4f', borderUpColor: '#0ec07f', wickDownColor: '#ff4d4f', wickUpColor: '#0ec07f' });
+      window.chartApi = chartApi;
+    }
+
+    async function fetchCandles(symbol, timespan, windowStr) {
+      const url = `/api/candles?symbol=${encodeURIComponent(symbol)}&timespan=${timespan}&window=${windowStr}`;
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(await resp.text());
+      const data = await resp.json();
+      return (data.candles || []).map(c => ({ time: Math.floor(c.t/1000), open: c.o, high: c.h, low: c.l, close: c.c }));
+    }
+
+    const state = { symbol: 'AAPL', timespan: '15m', window: 'max', watch: [] };
+    document.addEventListener('DOMContentLoaded', async () => {
+      await ensureChart();
+      const rows = await fetchCandles(state.symbol, state.timespan, state.window);
+      candleSeries.setData(rows);
+      document.getElementById('title').textContent = `${state.symbol} • ${state.timespan}`;
+      // Toggle handlers
+      const resizeChart = () => { try { const el = document.getElementById('chart'); chartApi.applyOptions({ width: el.clientWidth, height: el.clientHeight }); } catch {} };
+      document.getElementById('toggleLeft').onclick = () => { document.body.classList.toggle('collapsed-left'); setTimeout(resizeChart, 50); };
+      document.getElementById('toggleRight').onclick = () => { document.body.classList.toggle('collapsed-right'); setTimeout(resizeChart, 50); };
+      window.addEventListener('resize', resizeChart);
+    });
+  </script>
+</body>
+</html>
