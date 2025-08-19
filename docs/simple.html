@@ -75,6 +75,15 @@
   <script>
     // Basic chart init
     let chartApi, candleSeries;
+    // Determine API base: use ?api=... when provided, else default to same-origin /api
+    const API_BASE = (() => {
+      try {
+        const sp = new URLSearchParams(window.location.search);
+        const base = sp.get('api');
+        if (base) return base.replace(/\/+$/, '');
+      } catch (e) {}
+      return '/api';
+    })();
     async function ensureChart() {
       if (chartApi && candleSeries) return;
       chartApi = window.LightweightCharts.createChart(document.getElementById('chart'), {
@@ -88,7 +97,7 @@
     }
 
     async function fetchCandles(symbol, timespan, windowStr) {
-      const url = `/api/candles?symbol=${encodeURIComponent(symbol)}&timespan=${timespan}&window=${windowStr}`;
+      const url = `${API_BASE}/candles?symbol=${encodeURIComponent(symbol)}&timespan=${timespan}&window=${windowStr}`;
       const resp = await fetch(url);
       if (!resp.ok) throw new Error(await resp.text());
       const data = await resp.json();
