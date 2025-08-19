@@ -632,19 +632,19 @@
     }
     async function applyPmHighlights(symbol) {
       if (!state || !state.series) return;
-      // Only affect 1-hour timeframe candles
-      if (state.timespan !== '1h') return;
+      // Apply on 15m and 1h
+      if (state.timespan !== '1h' && state.timespan !== '15m') return;
       const data = state.series.data() || [];
       if (!data.length) return;
 
       const thr = 0.15; // 15%
       const orange = '#f59e0b';
 
-      // Recompute bar colors: color ALL post-market bars whose move >= 15% (up or down)
-      const next = data.map(pt => {
+      // Recolor only for 1h (keep chart clean on 15m), but compute alerts for both 15m and 1h
+      const next = (state.timespan === '1h') ? data.map(pt => {
         if (!pt || typeof pt.time !== 'number') return pt;
         const ms = pt.time * 1000;
-        if (!isPostMarketNY(ms)) return pt;
+        if (!isPostMarketNY(ms) && !isPreMarketNY(ms)) return pt;
         const o = pt.open, h = pt.high, l = pt.low;
         if (typeof o !== 'number' || o <= 0 || typeof h !== 'number' || typeof l !== 'number') return pt;
         const up = (h - o) / o;
@@ -654,10 +654,10 @@
           return { time: pt.time, open: pt.open, high: pt.high, low: pt.low, close: pt.close, color: orange, wickColor: orange, borderColor: orange };
         }
         return pt;
-      });
-      setSeriesDataWithIndex(next);
+      }) : data;
+      if (state.timespan === '1h') setSeriesDataWithIndex(next);
 
-      // Build alerts for orange post-market bars crossing any key level
+      // Build alerts from the visible series
       const alerts = [];
       const lv = state.monthlyLevels || null;
       if (lv) {
@@ -668,37 +668,57 @@
           { key: 'P.P.M.H', value: lv.ppmh },
         ].filter(L => L.value != null);
         for (const pt of next) {
-          const isOrange = pt && pt.color === orange;
-          if (!isOrange) continue;
           const ms = (pt.time || 0) * 1000;
-          if (!isPostMarketNY(ms)) continue;
-          const low = pt.low, high = pt.high, open = pt.open, close = pt.close;
-          if (typeof low !== 'number' || typeof high !== 'number' || typeof open !== 'number') continue;
-          const touched = levels.filter(L => typeof L.value === 'number' && low <= L.value && L.value <= high);
-          if (!touched.length) continue;
-          // Choose the level actually crossed: nearest to open price
+          const isExt = isPostMarketNY(ms) || isPreMarketNY(ms);
+          if (!isExt) continue;
+          const o = pt.open, h = pt.high, l = pt.low;
+          if (typeof o !== 'number' || o <= 0 || typeof h !== 'number' || typeof l !== 'number') continue;
+          const up = (h - o) / o, down = (o - l) / o;
+          if (up < thr && down < thr) continue;
+          const touched = levels.filter(L => typeof L.value === 'number' && l <= L.value && L.value <= h);
           const chosen = touched.reduce((best, L) => {
-            const dist = Math.abs(L.value - open);
+            const dist = Math.abs(L.value - o);
             if (!best) return { L, dist };
             return dist < best.dist ? { L, dist } : best;
           }, null);
-          if (chosen && chosen.L) alerts.push({ symbol: state.symbol, level: chosen.L.key, timeSec: pt.time });
+          alerts.push({ symbol: state.symbol, level: (chosen && chosen.L ? chosen.L.key : 'EXT'), timeSec: pt.time });
         }
       }
-      if (alerts.length) {
-        renderAlerts(alerts);
-        activateAlertsTab();
-      }
 
-      // Maintain Post-Market Watchlist: only for last NY day to avoid flooding
+      // Also compute alerts from a fresh extended dataset (decoupled from display)
+      try {
+        const extResp = await fetch(apiUrl('candles', `symbol=${encodeURIComponent(symbol)}&timespan=${state.timespan}&window=${state.window}`));
+        if (extResp.ok) {
+          const j = await extResp.json();
+          const rows = (j.candles || []).map(c => ({ time: Math.floor(c.t/1000), open: c.o, high: c.h, low: c.l, close: c.c }));
+          const more = [];
+          for (const pt of rows) {
+            const ms = (pt.time||0)*1000;
+            const isExt = isPostMarketNY(ms) || isPreMarketNY(ms);
+            if (!isExt) continue;
+            const o = pt.open, h = pt.high, l = pt.low;
+            if (typeof o !== 'number' || o <= 0 || typeof h !== 'number' || typeof l !== 'number') continue;
+            const up = (h - o) / o, down = (o - l) / o;
+            if (up >= thr || down >= thr) {
+              more.push({ symbol: state.symbol, level: 'EXT', timeSec: pt.time });
+            }
+          }
+          alerts.push(...more);
+        }
+      } catch {}
+
+      if (alerts.length) { renderAlerts(alerts); activateAlertsTab(); }
+
+      // Maintain Watchlist for pre/post (only last NY day to avoid flooding)
       const lastBar = data[data.length - 1];
       const lastDate = nyDateStr((lastBar.time || 0) * 1000);
       for (const pt of next) {
-        const isOrange = pt && pt.color === orange;
-        const isLastDay = nyDateStr((pt.time || 0) * 1000) === lastDate;
-        if (!isOrange || !isLastDay) continue;
-        const { hh } = nyParts((pt.time || 0) * 1000);
-        if (hh >= 16 && hh < 20) {
+        const ms = (pt.time || 0) * 1000;
+        const isExt = isPostMarketNY(ms) || isPreMarketNY(ms);
+        const isLastDay = nyDateStr(ms) === lastDate;
+        if (!isExt || !isLastDay) continue;
+        const { hh } = nyParts(ms);
+        if ((hh >= 16 && hh < 20) || (hh >= 4 && hh < 9)) {
           addPmWatchItem({ symbol: state.symbol, timeSec: pt.time });
         }
       }
