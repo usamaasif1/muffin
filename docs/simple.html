@@ -640,10 +640,20 @@
       const thr = 0.15; // 15%
       const orange = '#f59e0b';
 
+      // Limit to last 2 NY calendar days present in the dataset
+      const allowedDatesFromRows = (rows) => {
+        const dates = Array.from(new Set((rows || []).map(pt => nyDateStr(((pt && pt.time) || 0) * 1000)))).filter(Boolean).sort();
+        const last2 = dates.slice(-2);
+        return new Set(last2);
+      };
+      const allowedDates = allowedDatesFromRows(data);
+
       // Recolor only for 1h (keep chart clean on 15m), but compute alerts for both 15m and 1h
       const next = (state.timespan === '1h') ? data.map(pt => {
         if (!pt || typeof pt.time !== 'number') return pt;
         const ms = pt.time * 1000;
+        const dstr = nyDateStr(ms);
+        if (!allowedDates.has(dstr)) return pt;
         if (!isPostMarketNY(ms) && !isPreMarketNY(ms)) return pt;
         const o = pt.open, h = pt.high, l = pt.low;
         if (typeof o !== 'number' || o <= 0 || typeof h !== 'number' || typeof l !== 'number') return pt;
@@ -669,6 +679,8 @@
         ].filter(L => L.value != null);
         for (const pt of next) {
           const ms = (pt.time || 0) * 1000;
+          const dstr = nyDateStr(ms);
+          if (!allowedDates.has(dstr)) continue;
           const isExt = isPostMarketNY(ms) || isPreMarketNY(ms);
           if (!isExt) continue;
           const o = pt.open, h = pt.high, l = pt.low;
@@ -691,9 +703,12 @@
         if (extResp.ok) {
           const j = await extResp.json();
           const rows = (j.candles || []).map(c => ({ time: Math.floor(c.t/1000), open: c.o, high: c.h, low: c.l, close: c.c }));
+          const allowedExt = allowedDatesFromRows(rows);
           const more = [];
           for (const pt of rows) {
             const ms = (pt.time||0)*1000;
+            const dstr = nyDateStr(ms);
+            if (!allowedExt.has(dstr)) continue;
             const isExt = isPostMarketNY(ms) || isPreMarketNY(ms);
             if (!isExt) continue;
             const o = pt.open, h = pt.high, l = pt.low;
@@ -715,8 +730,8 @@
       for (const pt of next) {
         const ms = (pt.time || 0) * 1000;
         const isExt = isPostMarketNY(ms) || isPreMarketNY(ms);
-        const isLastDay = nyDateStr(ms) === lastDate;
-        if (!isExt || !isLastDay) continue;
+        const dstr = nyDateStr(ms);
+        if (!isExt || !allowedDates.has(dstr)) continue;
         const { hh } = nyParts(ms);
         if ((hh >= 16 && hh < 20) || (hh >= 4 && hh < 9)) {
           addPmWatchItem({ symbol: state.symbol, timeSec: pt.time });
