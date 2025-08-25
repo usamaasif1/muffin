@@ -220,7 +220,15 @@
       // Toggle handlers
       const resizeChart = () => { try { const el = document.getElementById('chart'); chartApi.applyOptions({ width: el.clientWidth, height: el.clientHeight }); } catch {} };
       document.getElementById('toggleLeft').onclick = () => { document.body.classList.toggle('collapsed-left'); setTimeout(resizeChart, 50); };
-      document.getElementById('toggleRight').onclick = () => { document.body.classList.toggle('collapsed-right'); setTimeout(resizeChart, 50); };
+      document.getElementById('toggleRight').onclick = async () => {
+        const willExpand = document.body.classList.contains('collapsed-right');
+        document.body.classList.toggle('collapsed-right');
+        setTimeout(resizeChart, 50);
+        if (willExpand && state.symbol) {
+          // When panel becomes visible again, ensure numbers are rendered
+          await refreshLevels(state.symbol);
+        }
+      };
       window.addEventListener('resize', resizeChart);
 
       // Timeframe switching
