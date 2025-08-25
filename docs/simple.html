@@ -84,6 +84,7 @@
       } catch (e) {}
       return '/api';
     })();
+
     async function ensureChart() {
       if (chartApi && candleSeries) return;
       chartApi = window.LightweightCharts.createChart(document.getElementById('chart'), {
@@ -101,20 +102,170 @@
       const resp = await fetch(url);
       if (!resp.ok) throw new Error(await resp.text());
       const data = await resp.json();
-      return (data.candles || []).map(c => ({ time: Math.floor(c.t/1000), open: c.o, high: c.h, low: c.l, close: c.c }));
+      return (data.candles || []).map(c => ({ time: Math.floor(c.t/1000), open: c.o, high: c.h, low: c.l, close: c.c, t: c.t }));
     }
 
-    const state = { symbol: 'AAPL', timespan: '15m', window: 'max', watch: [] };
+    async function searchSymbols(q) {
+      if (!q || q.length < 1) return [];
+      try {
+        const resp = await fetch(`${API_BASE}/search?q=${encodeURIComponent(q)}`);
+        if (!resp.ok) return [];
+        const data = await resp.json();
+        return data.items || [];
+      } catch { return []; }
+    }
+
+    const state = {
+      symbol: 'AAPL',
+      timespan: '15m',
+      window: 'max',
+      watch: JSON.parse(localStorage.getItem('simple.watch') || '[]'),
+      priceLines: []
+    };
+
+    function saveWatch() { localStorage.setItem('simple.watch', JSON.stringify(state.watch)); }
+
+    function clearPriceLines() {
+      (state.priceLines || []).forEach(pl => { try { candleSeries.removePriceLine(pl); } catch {} });
+      state.priceLines = [];
+    }
+
+    function drawLevelLines(levels) {
+      clearPriceLines();
+      if (!levels) return;
+      const defs = [];
+      if (levels.lml != null) defs.push({ price: levels.lml, color: '#94a3b8', style: 1, title: 'L.M.L' });
+      if (levels.lmh != null) defs.push({ price: levels.lmh, color: '#94a3b8', style: 1, title: 'L.M.H' });
+      if (levels.ppml != null) defs.push({ price: levels.ppml, color: '#38bdf8', style: 2, title: 'P.P.M.L' });
+      if (levels.ppmh != null) defs.push({ price: levels.ppmh, color: '#38bdf8', style: 2, title: 'P.P.M.H' });
+      const epsilon = 1e-6; const added = [];
+      defs.forEach(d => {
+        if (added.some(p => Math.abs(p - d.price) < epsilon)) return;
+        const pl = candleSeries.createPriceLine({ price: d.price, color: d.color, lineWidth: 1, lineStyle: d.style, axisLabelVisible: true, title: d.title });
+        state.priceLines.push(pl); added.push(d.price);
+      });
+    }
+
+    function computeLevelsFromDaily(daily) {
+      if (!daily || !daily.length) return null;
+      const sorted = daily.slice().sort((a,b)=>a.t-b.t);
+      const lastTs = sorted[sorted.length - 1].t;
+      const lmEnd = lastTs - 24*3600*1000;
+      const lmStart = lmEnd - 31*24*3600*1000;
+      const lmWin = sorted.filter(c => c.t >= lmStart && c.t <= lmEnd);
+      const lml = lmWin.length ? Math.min(...lmWin.map(c => c.l)) : null;
+      const lmh = lmWin.length ? Math.max(...lmWin.map(c => c.h)) : null;
+      const d = new Date(lastTs);
+      let pmY = d.getUTCFullYear(); let pmM = d.getUTCMonth() - 1; if (pmM < 0) { pmM = 11; pmY -= 1; }
+      const ppmStart = Date.UTC(pmY, pmM, 1, 0, 0, 0);
+      const ppmEnd = Date.UTC(pmY, pmM + 1, 0, 23, 59, 59);
+      const ppmWin = sorted.filter(c => c.t >= ppmStart && c.t <= ppmEnd);
+      const ppml = ppmWin.length ? Math.min(...ppmWin.map(c => c.l)) : null;
+      const ppmh = ppmWin.length ? Math.max(...ppmWin.map(c => c.h)) : null;
+      return { lml, lmh, ppml, ppmh };
+    }
+
+    function renderLevelsPanel(lv) {
+      const fmt = (v) => (v != null ? Number(v).toFixed(2) : '—');
+      document.getElementById('live_lvl_lml').textContent = fmt(lv?.lml);
+      document.getElementById('live_lvl_lmh').textContent = fmt(lv?.lmh);
+      document.getElementById('live_lvl_ppml').textContent = fmt(lv?.ppml);
+      document.getElementById('live_lvl_ppmh').textContent = fmt(lv?.ppmh);
+    }
+
+    async function refreshLevels(symbol) {
+      try {
+        const url = `${API_BASE}/candles?symbol=${encodeURIComponent(symbol)}&timespan=day&window=90d`;
+        const resp = await fetch(url);
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data?.detail || 'Daily fetch failed');
+        const daily = (data.candles || []).map(c => ({ t: c.t, h: c.h, l: c.l }));
+        const lv = computeLevelsFromDaily(daily);
+        renderLevelsPanel(lv);
+        drawLevelLines(lv);
+      } catch (e) {
+        // leave existing levels
+      }
+    }
+
+    async function loadSymbol(symbol) {
+      const sym = String(symbol || '').toUpperCase(); if (!sym) return;
+      const rows = await fetchCandles(sym, state.timespan, state.window);
+      candleSeries.setData(rows);
+      state.symbol = sym;
+      document.getElementById('title').textContent = `${state.symbol} • ${state.timespan}`;
+      await refreshLevels(state.symbol);
+    }
+
+    function renderWatch() {
+      const el = document.getElementById('watch');
+      el.innerHTML = '';
+      (state.watch || []).forEach(sym => {
+        const row = document.createElement('div'); row.className = 'watch-item';
+        const name = document.createElement('span'); name.textContent = sym;
+        const rm = document.createElement('span'); rm.className = 'rm'; rm.textContent = '×';
+        rm.onclick = (ev) => { ev.stopPropagation(); state.watch = state.watch.filter(s => s !== sym); saveWatch(); renderWatch(); };
+        row.onclick = () => loadSymbol(sym);
+        row.appendChild(name); row.appendChild(rm);
+        el.appendChild(row);
+      });
+    }
+
     document.addEventListener('DOMContentLoaded', async () => {
       await ensureChart();
-      const rows = await fetchCandles(state.symbol, state.timespan, state.window);
-      candleSeries.setData(rows);
-      document.getElementById('title').textContent = `${state.symbol} • ${state.timespan}`;
+      // Initialize watch list
+      if (!state.watch.length) { state.watch = ['AAPL', 'TSLA']; saveWatch(); }
+      renderWatch();
+      await loadSymbol(state.watch[0] || state.symbol);
       // Toggle handlers
       const resizeChart = () => { try { const el = document.getElementById('chart'); chartApi.applyOptions({ width: el.clientWidth, height: el.clientHeight }); } catch {} };
       document.getElementById('toggleLeft').onclick = () => { document.body.classList.toggle('collapsed-left'); setTimeout(resizeChart, 50); };
       document.getElementById('toggleRight').onclick = () => { document.body.classList.toggle('collapsed-right'); setTimeout(resizeChart, 50); };
       window.addEventListener('resize', resizeChart);
+
+      // Timeframe switching
+      document.querySelectorAll('.tf').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          state.timespan = btn.getAttribute('data-tf');
+          await loadSymbol(state.symbol);
+        });
+      });
+
+      // Search suggestions into datalist
+      const searchEl = document.getElementById('search');
+      const dl = document.getElementById('symbols');
+      searchEl.addEventListener('input', async () => {
+        const q = searchEl.value.trim(); if (!q) { dl.innerHTML=''; return; }
+        const items = await searchSymbols(q);
+        dl.innerHTML = '';
+        items.slice(0,10).forEach(it => {
+          const opt = document.createElement('option');
+          opt.value = it.symbol;
+          opt.label = it.name || it.symbol;
+          dl.appendChild(opt);
+        });
+      });
+      // Go button
+      document.getElementById('go').onclick = async () => {
+        let q = searchEl.value.trim(); if (!q) return;
+        let sym = q.toUpperCase();
+        if (!/^[A-Z.\-]+$/.test(sym)) {
+          const items = await searchSymbols(q);
+          if (items.length) sym = String(items[0].symbol || '').toUpperCase();
+        }
+        await loadSymbol(sym);
+      };
+      // Add button with search-backed resolution
+      document.getElementById('add').onclick = async () => {
+        let q = searchEl.value.trim(); if (!q) return;
+        let sym = q.toUpperCase();
+        if (!/^[A-Z.\-]+$/.test(sym)) {
+          const items = await searchSymbols(q);
+          if (items.length) sym = String(items[0].symbol || '').toUpperCase();
+        }
+        if (!state.watch.includes(sym)) { state.watch.push(sym); saveWatch(); renderWatch(); }
+        await loadSymbol(sym);
+      };
     });
   </script>
 </body>
