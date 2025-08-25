@@ -32,6 +32,75 @@ def _get_polygon_key(explicit_key: Optional[str] = None) -> Optional[str]:
     return os.environ.get("POLYGON_API_KEY")
 
 
+def search_symbols(query: str, polygon_key: Optional[str] = None) -> List[Dict[str, str]]:
+    """Search symbols via Polygon (if key present) else Yahoo query2 API.
+
+    Returns a list of {symbol, name} dictionaries, at most 10 items.
+    """
+    q = (query or "").strip()
+    if not q:
+        return []
+    # Prefer Polygon reference search when an API key is available
+    key = _get_polygon_key(polygon_key)
+    if key:
+        try:
+            url = (
+                "https://api.polygon.io/v3/reference/tickers?" +
+                urlencode({
+                    "search": q,
+                    "active": "true",
+                    "limit": 10,
+                    "apiKey": key,
+                })
+            )
+            resp = requests.get(url, timeout=15)
+            resp.raise_for_status()
+            data = resp.json() or {}
+            results = (data.get("results") or [])[:10]
+            out: List[Dict[str, str]] = []
+            for r in results:
+                sym = (r.get("ticker") or "").strip()
+                name = (r.get("name") or "").strip()
+                if sym:
+                    out.append({"symbol": sym.upper(), "name": name})
+            if out:
+                return out
+        except Exception:
+            # fall through to Yahoo
+            pass
+
+    # Yahoo Finance search (query2) fallback — more reliable than the old autoc endpoint
+    try:
+        yh_url = (
+            "https://query2.finance.yahoo.com/v1/finance/search?" +
+            urlencode({
+                "q": q,
+                "quotesCount": 10,
+                "newsCount": 0,
+                "listsCount": 0,
+            })
+        )
+        headers = {
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118 Safari/537.36",
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+        }
+        resp = requests.get(yh_url, headers=headers, timeout=15)
+        resp.raise_for_status()
+        data = resp.json() or {}
+        quotes = (data.get("quotes") or [])[:10]
+        out: List[Dict[str, str]] = []
+        for qd in quotes:
+            sym = (qd.get("symbol") or "").strip()
+            name = (qd.get("shortname") or qd.get("longname") or qd.get("name") or "").strip()
+            exch = (qd.get("exchDisp") or "").strip()
+            if sym:
+                # Prefer obvious stock-like instruments; do not hard filter since users may want ETFs, etc.
+                out.append({"symbol": sym.upper(), "name": name or exch})
+        return out
+    except Exception as exc:
+        raise MarketDataError(f"Search failed: {exc}") from exc
+
+
 def _get_alpaca_keys(
     explicit_key_id: Optional[str] = None,
     explicit_secret: Optional[str] = None,

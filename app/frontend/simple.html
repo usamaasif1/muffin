@@ -493,10 +493,22 @@
       });
     }
 
-    addBtn.addEventListener('click', () => {
-      const sym = (search.value || '').trim().toUpperCase();
-      if (!sym) return;
+    addBtn.addEventListener('click', async () => {
+      const raw = (search.value || '').trim();
+      if (!raw) return;
+      let sym = raw.toUpperCase();
+      if (!/^[A-Z.\-]+$/.test(sym)) {
+        try {
+          const resp = await fetch(`/api/search?q=${encodeURIComponent(raw)}`);
+          if (resp.ok) {
+            const data = await resp.json();
+            const first = (data.items || [])[0];
+            if (first && first.symbol) sym = String(first.symbol).toUpperCase();
+          }
+        } catch {}
+      }
       if (!state.watch.includes(sym)) { state.watch.push(sym); saveWatch(); renderWatch(); }
+      loadSymbol(sym);
     });
 
     document.querySelectorAll('.tf').forEach(btn => {

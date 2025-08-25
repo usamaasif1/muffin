@@ -188,26 +188,34 @@
       return mins >= (9 * 60 + 30) && mins <= (16 * 60);
     }
 
-    function computeLevels(candles) {
-      if (!candles.length) return null;
-      const prices = candles.map(c => c.c);
+    function computeLevelsFromDaily(dailyCandles) {
+      if (!dailyCandles.length) return null;
+      const prices = dailyCandles.map(c => c.c);
       const min = Math.min(...prices);
       const max = Math.max(...prices);
       const avg = prices.reduce((a, b) => a + b, 0) / prices.length;
       const mid = (min + max) / 2;
 
-      const lastTs = candles[candles.length - 1].t;
-      const cutoff = lastTs - 30 * 24 * 60 * 60 * 1000;
-      const lastMonth = candles.filter(c => c.t >= cutoff);
-      const lml = Math.min(...lastMonth.map(c => c.l));
-      const lmh = Math.max(...lastMonth.map(c => c.h));
+      const sorted = dailyCandles.slice().sort((a,b)=>a.t-b.t);
+      const lastTs = sorted[sorted.length - 1].t;
 
+      // Rolling last month: 31 trailing days ending day before last daily bar (NY-based not required here for simplicity)
+      const lmEnd = lastTs - 24*3600*1000;
+      const lmStart = lmEnd - 31*24*3600*1000;
+      const lmWindow = sorted.filter(c => c.t >= lmStart && c.t <= lmEnd);
+      const lml = lmWindow.length ? Math.min(...lmWindow.map(c => c.l)) : null;
+      const lmh = lmWindow.length ? Math.max(...lmWindow.map(c => c.h)) : null;
+
+      // Previous calendar month based on UTC time
       const d = new Date(lastTs);
-      const prevMonthEnd = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 0, 23, 59, 59));
-      const prevMonthStart = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1, 0, 0, 0));
-      const pp = candles.filter(c => c.t >= prevMonthStart.getTime() && c.t <= prevMonthEnd.getTime());
-      const ppml = pp.length ? Math.min(...pp.map(c => c.l)) : null;
-      const ppmh = pp.length ? Math.max(...pp.map(c => c.h)) : null;
+      let pmYear = d.getUTCFullYear();
+      let pmMonth = d.getUTCMonth() - 1;
+      if (pmMonth < 0) { pmMonth = 11; pmYear -= 1; }
+      const ppmStart = Date.UTC(pmYear, pmMonth, 1, 0, 0, 0);
+      const ppmEnd = Date.UTC(pmYear, pmMonth + 1, 0, 23, 59, 59);
+      const ppmWindow = sorted.filter(c => c.t >= ppmStart && c.t <= ppmEnd);
+      const ppml = ppmWindow.length ? Math.min(...ppmWindow.map(c => c.l)) : null;
+      const ppmh = ppmWindow.length ? Math.max(...ppmWindow.map(c => c.h)) : null;
 
       return { min, max, avg, mid, lml, lmh, ppml, ppmh };
     }
@@ -292,7 +300,23 @@
         state.candles = raw;
         const visible = filterSession(raw);
         candleSeries.setData(visible.map(toSeries));
-        const lv = computeLevels(visible);
+        // Fetch daily 90d to ensure level coverage regardless of intraday range
+        let lv = null;
+        try {
+          const resp = await fetch(`/api/candles?symbol=${encodeURIComponent(state.symbol)}&timespan=day&window=90d`, { headers: authHeaders() });
+          if (resp.ok) {
+            const d = await resp.json();
+            const daily = (d.candles || []);
+            lv = computeLevelsFromDaily(daily);
+          }
+        } catch {}
+        if (!lv) {
+          // Fallback to computing from visible data
+          const prices = visible.map(c => c.c);
+          if (prices.length) {
+            lv = { min: Math.min(...prices), max: Math.max(...prices), avg: prices.reduce((a,b)=>a+b,0)/prices.length, mid: (Math.min(...prices)+Math.max(...prices))/2, lml: null, lmh: null, ppml: null, ppmh: null };
+          }
+        }
         setLevelsUI(lv);
         setLevelLines(lv);
         updateWatchBadges();

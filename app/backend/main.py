@@ -21,6 +21,7 @@ from backend.services.market_data import (
     fetch_candles_alpaca_public,
     fetch_candles_yahoo_public,
     MarketDataError,
+    search_symbols,
 )
 
 # Load environment variables from .env if present (try repo root and app root)
@@ -108,23 +109,7 @@ async def read_github_file_endpoint(payload: ReadGithubRequest) -> dict:
 @app.get("/api/search")
 async def api_search(q: str = Query(..., min_length=1), x_api_key: Optional[str] = Header(default=None)) -> dict:
     try:
-        # Try service search; if unavailable, fallback to Yahoo suggest
-        try:
-            from backend.services.market_data import search_symbols as _search_symbols
-            items = _search_symbols(q, polygon_key=x_api_key)
-        except Exception:
-            url = f"https://autoc.finance.yahoo.com/autoc?query={requests.utils.quote(q)}&region=1&lang=en"
-            headers = {"User-Agent": "Mozilla/5.0"}
-            resp = requests.get(url, headers=headers, timeout=15)
-            resp.raise_for_status()
-            data = resp.json()
-            raw = ((data.get("ResultSet") or {}).get("Result") or [])[:10]
-            items = []
-            for itm in raw:
-                sym = itm.get("symbol") or ""
-                name = itm.get("name") or ""
-                if sym:
-                    items.append({"symbol": sym, "name": name})
+        items = search_symbols(q, polygon_key=x_api_key)
         return {"items": items}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

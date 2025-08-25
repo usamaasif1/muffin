@@ -1,0 +1,12 @@
+INFO:     Started server process [5610]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+[boot] provider=polygon branch=unknown
+INFO:     127.0.0.1:35274 - "GET /api/search?q=apple HTTP/1.1" 200 OK
+[candles] provider=polygon tf=1m
+INFO:     127.0.0.1:39982 - "GET /api/candles?symbol=AAPL&timespan=1m&window=5d HTTP/1.1" 200 OK
+[candles] provider=polygon tf=1m
+INFO:     127.0.0.1:41750 - "GET /api/candles?symbol=AAPL&timespan=1m&window=5d HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43690 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48994 - "GET /simple.html HTTP/1.1" 200 OK
